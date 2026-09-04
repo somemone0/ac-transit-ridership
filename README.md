@@ -1,5 +1,7 @@
 # AC Transit Ridership Explorer
 
+**Live: https://ac-transit-ridership-385939155005.us-west1.run.app**
+
 An interactive map of stop-level bus ridership across the AC Transit network
 from January 2019 through May 2026 — 387 weeks spanning the pandemic collapse
 and the recovery that followed.
@@ -124,13 +126,26 @@ The app is containerized and runs on Cloud Run. The image carries only the
 application; the browser fetches data from the bucket.
 
 ```bash
-gcloud run deploy ac-transit-ridership \
-  --source . --region us-west1 --allow-unauthenticated
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_CARTO_KEY=<key>,_TAG=$(git rev-parse --short HEAD)
 ```
 
-The Dockerfile defaults `NEXT_PUBLIC_PACK_BASE` to the public bucket, so that
-command needs no further configuration. To serve a different bundle, pass
-`--build-arg NEXT_PUBLIC_PACK_BASE=...` to a `gcloud builds submit` instead.
+`cloudbuild.yaml` builds the image, pushes it, and rolls out the revision.
+Both `NEXT_PUBLIC_*` values have to be set at *build* time, not as Cloud Run
+env vars, because `next build` inlines them into the client bundle — setting
+them on the service afterwards has no effect.
+
+`_CARTO_KEY` is a substitution rather than a committed value. It is not really
+a secret (every `NEXT_PUBLIC_*` value ships to the browser, so anyone can read
+it out of the deployed bundle), but keeping it out of a public repo means it
+cannot be scraped and charged against this account's tile quota without at
+least visiting the site. Omit it and the map falls back to OpenStreetMap
+tiles — which works, but pointing production traffic at
+`tile.openstreetmap.org` is discouraged by their usage policy.
+
+A plain `gcloud run deploy --source .` also works and picks up the
+`NEXT_PUBLIC_PACK_BASE` default baked into the Dockerfile, but it has no way
+to pass the CARTO key, so the map will be on the OSM fallback.
 
 ## Licenses
 
