@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.md
+# 55 MB of derived data the browser gets from GCS instead
+public/data/pack
+scripts/__pycache__
+.DS_Store
+.env*

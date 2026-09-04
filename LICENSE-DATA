@@ -1,0 +1,16 @@
+The datasets distributed with and alongside this project -- the packed bundle
+under public/data/pack (mirrored at gs://ac-transit-ridership-pack) and the
+raw automatic passenger counter extracts published as the HuggingFace dataset
+somemone/ac-transit-apc -- are licensed under the Creative Commons Attribution
+4.0 International License (CC BY 4.0).
+
+You are free to share and adapt the material for any purpose, including
+commercially, provided you give appropriate credit, link to the license, and
+indicate if changes were made.
+
+Full text: https://creativecommons.org/licenses/by/4.0/legalcode
+Summary:   https://creativecommons.org/licenses/by/4.0/
+
+The underlying automatic passenger counter records originate with the
+Alameda-Contra Costa Transit District (AC Transit). This project is not
+affiliated with or endorsed by AC Transit.
