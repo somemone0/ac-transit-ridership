@@ -125,9 +125,12 @@ application; the browser fetches data from the bucket.
 
 ```bash
 gcloud run deploy ac-transit-ridership \
-  --source . --region us-west1 --allow-unauthenticated \
-  --build-env-vars-file=cloudbuild-env.yaml
+  --source . --region us-west1 --allow-unauthenticated
 ```
+
+The Dockerfile defaults `NEXT_PUBLIC_PACK_BASE` to the public bucket, so that
+command needs no further configuration. To serve a different bundle, pass
+`--build-arg NEXT_PUBLIC_PACK_BASE=...` to a `gcloud builds submit` instead.
 
 ## Licenses
 

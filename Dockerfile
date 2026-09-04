@@ -15,8 +15,10 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Baked into the client bundle at build time, so it has to be present here and
 # not just at run time.
-ARG NEXT_PUBLIC_PACK_BASE
-ARG NEXT_PUBLIC_CARTO_KEY
+# Defaulted so `gcloud run deploy --source .` needs no extra plumbing; pass
+# --build-arg to point a deployment at a different bundle.
+ARG NEXT_PUBLIC_PACK_BASE=https://storage.googleapis.com/ac-transit-ridership-pack/pack
+ARG NEXT_PUBLIC_CARTO_KEY=
 ENV NEXT_PUBLIC_PACK_BASE=$NEXT_PUBLIC_PACK_BASE
 ENV NEXT_PUBLIC_CARTO_KEY=$NEXT_PUBLIC_CARTO_KEY
 ENV NEXT_TELEMETRY_DISABLED=1
