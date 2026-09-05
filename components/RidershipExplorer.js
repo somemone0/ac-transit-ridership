@@ -352,7 +352,8 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
           {labels("no inferred flow", `${fmt(focusMax)} riders / wkday`)}
           <p className="hint">
             Morning (5-9am) inferred riders {commuteFocusMode === "from" ? "leaving" : "arriving at"}{" "}
-            <b>{commuteFocus.label}</b>, {period.label} snapshot. Grey: no flow above the floor.
+            <b>{commuteFocus.label}</b>, {period.label} snapshot. Dot size and colour both scale with
+            the inferred flow; outlined dots are the selected {commuteFocus.kind === "region" ? "region" : "place"}.
             Click another place to re-focus; X in the sidebar clears.
           </p>
         </>
@@ -643,18 +644,26 @@ function renderDataLayer(api, data, options) {
       let value;
       let color;
       let edge = {};
+      let sizeDenom = domain;
       if (commute) {
         if (focusMap) {
-          const stats = commuteStats(commute, "group", index, options.commutePeriodIdx);
-          value = stats ? stats.total : 0;
-          const flow = focusMap.get(index);
-          color = flow ? ramp(SEQ_GREEN, Math.sqrt(flow / focusMax)) : null;
-          if (focus.kind === "region") {
-            if (options.commuteFocusMembers?.has(index)) {
-              edge = { color: "#419c62", weight: 1.5, opacity: 1 };
-            }
-          } else if (index === focus.key) {
-            edge = { color: "#0d5732", weight: 2, opacity: 1 };
+          // Inferred-riders mode: dot size encodes the inferred flow, not
+          // total ridership. The selected place / region members keep their
+          // ridership size and are marked by outline instead.
+          const isMember = focus.kind === "region"
+            ? !!(options.commuteFocusMembers && options.commuteFocusMembers.has(index))
+            : index === focus.key;
+          if (isMember) {
+            const stats = commuteStats(commute, "group", index, options.commutePeriodIdx);
+            value = stats ? stats.total : 0;
+            edge = focus.kind === "region"
+              ? { color: "#419c62", weight: 1.5, opacity: 1 }
+              : { color: "#0d5732", weight: 2, opacity: 1 };
+          } else {
+            const flow = focusMap.get(index) || 0;
+            value = flow;
+            sizeDenom = focusMax;
+            color = flow ? ramp(SEQ_GREEN, Math.sqrt(flow / focusMax)) : null;
           }
         } else {
           const result = commuteValue(commute, "group", index, options.commuteMode, options.commutePeriodIdx);
@@ -666,7 +675,7 @@ function renderDataLayer(api, data, options) {
         color = colorFor(data, "group", index, week, view, recThresh);
       }
       const visible = value > 0 && !!(color || edge.color);
-      marker.setRadius(visible ? Math.min(MAX_DOT_R, 2.5 + Math.sqrt(value / domain) * 11) : 1);
+      marker.setRadius(visible ? Math.min(MAX_DOT_R, 2.5 + Math.sqrt(value / sizeDenom) * 11) : 1);
       marker.setStyle({
         fillColor: color || "#e8e7e2",
         fillOpacity: visible ? (color ? 0.82 : 0.35) : 0,
