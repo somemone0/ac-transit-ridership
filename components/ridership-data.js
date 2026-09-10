@@ -257,14 +257,9 @@ export function incomeAt(data, level, key) {
   if (!table) return null;
   const med = table.med[index];
   if (med === null || med === undefined) return null;
-  const moe = table.moe[index];
   return {
     med,
-    moe: moe ?? null,
-    // A top-coded median has no computable MOE; that is not the same as an
-    // unknown one, so the two are reported separately.
     topCoded: med >= income.top_code,
-    rel: moe && med ? moe / med : null,
   };
 }
 
@@ -282,31 +277,11 @@ export function incomeDomain(data) {
   return data.incomeDom;
 }
 
-// Uncertainty is drawn as loss of chroma at constant lightness. Fading toward
-// the surface instead would be read as a different income: on a dark basemap a
-// paler low-income fill darkens, and this ramp already uses dark for high.
-// Washing the colour out cannot be confused with moving along the ramp.
-function mute(hex, amount) {
-  if (amount <= 0) return hex;
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const grey = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  const t = Math.min(1, amount);
-  const mix = (c) => Math.round(c + (grey - c) * t).toString(16).padStart(2, "0");
-  return `#${mix(r)}${mix(g)}${mix(b)}`;
-}
-
 export function incomeColor(data, level, key) {
   const income = incomeAt(data, level, key);
   if (!income) return null;
   const [lo, hi] = incomeDomain(data);
-  const base = ramp(SEQ_MAGENTA, (income.med - lo) / Math.max(1, hi - lo));
-  // Full colour up to a 20% margin, washed out by 60%, which is roughly the
-  // 90th percentile of block-group error. Top-coded medians keep full chroma:
-  // "$250,000 or more" is a confident statement, not a noisy one.
-  if (income.topCoded || !income.rel) return base;
-  return mute(base, Math.max(0, (income.rel - 0.2) / 0.4) * 0.8);
+  return ramp(SEQ_MAGENTA, (income.med - lo) / Math.max(1, hi - lo));
 }
 
 export function metricAt(data, level, key, week, view, recThresh) {
@@ -489,13 +464,13 @@ export function routesFor(data, level, key, week) {
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
-export function selectionSeries(data, keys) {
+export function selectionSeries(data, keys, level = "group") {
   const real = new Float64Array(data.W);
   const imp = new Float64Array(data.W);
   for (const key of keys) {
     for (let week = 0; week < data.W; week += 1) {
-      const imputed = imputedAt(data, "group", key, week);
-      real[week] += totalAt(data, "group", key, week) - imputed;
+      const imputed = imputedAt(data, level, key, week);
+      real[week] += totalAt(data, level, key, week) - imputed;
       imp[week] += imputed;
     }
   }

@@ -107,7 +107,7 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx }) {
   const routes = routesFor(data, level, keyIndex, week);
   const recoveryTable = meta.recovery[level === "group" ? "stopgroup" : level]?.[keyIndex] || [];
   const label = detail.label;
-  const series = selectionSeries(data, [keyIndex]);
+  const series = selectionSeries(data, [keyIndex], level);
   const members = level === "group" ? group.members[keyIndex] || [] : [];
 
   return (
@@ -330,9 +330,8 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
         {labels(`$${Math.round(lo / 1000)}k`, `$${Math.round(hi / 1000)}k+`)}
         <p className="hint">
           {income.measure}, ACS {income.year} 5-year ({income.table}). Fixed to the
-          tract range, so a colour means the same income at either level. Washed-out
-          fills are estimates with a wide margin of error &mdash; hover for the
-          &plusmn; figure. Grey: not published. Corridors keep showing onboard load.
+          tract range, so a colour means the same income at either level. Grey: not
+          published. Corridors keep showing onboard load.
         </p>
         <p className="hint">
           One figure for the whole period: ACS does not track week to week, so the
@@ -506,9 +505,6 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
   );
 }
 
-// One row, with the margin of error beside the figure rather than buried. ACS
-// block-group medians carry a median error of about a third of the estimate,
-// so a bare number here would claim precision the survey does not have.
 function incomeRowHtml(data, level, keyIndex) {
   const income = incomeAt(data, level, keyIndex);
   const label = level === "group" ? "Median income (tract)" : "Median income";
@@ -516,10 +512,7 @@ function incomeRowHtml(data, level, keyIndex) {
     return `<div class="row"><span class="k">${label}</span><span>not published</span></div>`;
   }
   const value = income.topCoded ? "$250,000+" : `$${Math.round(income.med).toLocaleString()}`;
-  const error = income.topCoded || !income.moe
-    ? ""
-    : ` <span class="k">&plusmn; ${Math.round(income.moe).toLocaleString()}</span>`;
-  return `<div class="row"><span class="k">${label}</span><span>${value}${error}</span></div>`;
+  return `<div class="row"><span class="k">${label}</span><span>${value}</span></div>`;
 }
 
 function statHtml(data, level, keyIndex, week) {
