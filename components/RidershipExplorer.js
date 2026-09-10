@@ -507,7 +507,7 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
 
 function incomeRowHtml(data, level, keyIndex) {
   const income = incomeAt(data, level, keyIndex);
-  const label = level === "group" ? "Median income (tract)" : "Median income";
+  const label = level === "group" ? "Median income (block group)" : "Median income";
   if (!income) {
     return `<div class="row"><span class="k">${label}</span><span>not published</span></div>`;
   }

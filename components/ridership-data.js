@@ -242,16 +242,17 @@ export function recoveryAt(data, level, key, threshold) {
 }
 
 // ACS median household income for an area. A stop group has no income of its
-// own, so it reads the tract containing it -- the same tract the area view
-// would colour underneath it.
+// own, so it reads the block group containing it -- ACS publishes B19013
+// down to block group, the finest geography this map draws, so that is a
+// closer estimate than borrowing the (larger) enclosing tract.
 export function incomeAt(data, level, key) {
   const income = data.meta.income;
   if (!income) return null;
   let table = income[level];
   let index = key;
   if (level === "group") {
-    index = data.meta.stop_groups.tract[key];
-    table = income.tract;
+    index = data.meta.stop_groups.bgroup[key];
+    table = income.bgroup;
     if (index === undefined || index < 0) return null;
   }
   if (!table) return null;
