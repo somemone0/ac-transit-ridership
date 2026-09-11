@@ -149,9 +149,30 @@ gcloud storage cp /tmp/manifest.json \
 ```
 
 No redeploy is needed — the app reads the bucket at run time. Objects carry a
-one-day cache lifetime, so a change can take up to 24 h to reach browsers that
-already loaded the old copy. To force it sooner, upload under a new prefix and
-rebuild with `_PACK_BASE` pointing at it.
+one-day cache lifetime, and Google's edge caches public objects for that long
+too, so a change can take up to 24 h to reach anyone. To force it sooner,
+upload under a new prefix and rebuild with `_PACK_BASE` pointing at it.
+
+### Updating only the commute pack
+
+`scripts/build_commute_pack.py` gives its binaries content-hashed names
+(`commute_od_2019-02.<hash>.bin`), and `commute_meta.json` names the ones it
+belongs to. The binaries are unreadable without their own meta, so upload in
+this order and keep the previous build's binaries in the bucket for at least
+a day, because cached copies of the old meta still point at them:
+
+```bash
+cd public/data/pack
+# 1. New binaries. Nothing references them yet.
+gcloud storage cp commute_*.*.bin gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=86400"
+# 2. The meta, with a short cache so readers move to the new binaries quickly.
+gcloud storage cp commute_meta.json gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=300"
+```
+
+Then regenerate and upload the manifest as above. The meta's short cache
+only applies once the edge has let go of the previous copy.
 
 ## Verifying a deploy
 
