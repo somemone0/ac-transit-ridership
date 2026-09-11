@@ -2,35 +2,54 @@
 
 Sources: raw APC event parquet for a series of six-month snapshot months (Feb
 and Aug of each year, plus the latest available month), downloaded from
-gs://ac-transit-stops and cached locally. Values are capture-corrected per
-(route, bit) with the pipeline's capture_table.parquet and NTD-calibrated per
-month, so these figures reconcile with the app's weekly numbers.
+gs://ac-transit-stops and cached locally. Values are NTD-calibrated per month
+and capture-corrected per (route, bit, time-of-day band of the trip start)
+with capture_band_table.parquet. Band factors only redistribute a route-bit's
+month across the day: each route-bit keeps the level the route-month factor
+gives it, so totals still reconcile with the app's weekly numbers.
 
 Snapshots let the commute view compare pre- and post-pandemic patterns; rerun
 this script every ~6 months (or after each new GCS month lands) and it picks
 up the newest anchor automatically.
 
-O-D inference: per (raw route, bit) matched to the *era-matched* GTFS (route,
-dir) stop sequence by stop-set overlap, IPF (Furness) on AM (5-9)
-boardings/alightings marginals with a soft backward weight, then stop-to-stop
-flows aggregated to stop-group / tract / block-group pairs. Top-K lists per
-key are written per snapshot; the client fetches one snapshot's file on
-demand. PM O-D is not built — the AM matrix carries the commute story in both
-directions (in-list = who arrives here, out-list = who leaves here).
+O-D inference, per (route, bit) for trips starting 5-9 a.m.:
+  * Stop order comes from the trips themselves -- each stop's median minutes
+    into the trip, over the stops at least MIN_STOP_SHARE of trips serve. The
+    GTFS era sequences are missing stops the buses serve, and dropping those
+    events lost up to a quarter of a direction's boardings.
+  * Each trip's own boarding/alighting vector is fitted against a shared base
+    matrix, and the base is rebuilt from the summed trip fits, for a few
+    passes (Ji, Mishalani & McCord 2014 -- an approximate EM). Summing a
+    month of trips before one fit, as this script used to, throws away which
+    stops fill up together on the same bus. Trips whose ons and offs differ by
+    IMBALANCE_MAX or more are left out of the fit (TCRP Report 113 screening).
+  * The number of passes -- or the old summed fit (0 passes), which does
+    better on a few routes with loops and on thin routes -- is chosen per
+    route-bit by predicting each even-day trip's alightings from its
+    boardings with a fit on odd days, and vice versa.
+  * The chosen structure is raked to the corrected AM boarding/alighting
+    totals, and stop-to-stop flows are aggregated to stop-group / tract /
+    block-group pairs.
+Top-K lists per key are written per snapshot; the client fetches one
+snapshot's file on demand. PM O-D is not built — the AM matrix carries the
+commute story in both directions (in-list = who arrives here, out-list = who
+leaves here).
 
 Outputs (nextjsvis/public/data/pack/):
-  commute_meta.json
-  commute_hourly_{group,tract,bgroup,route}.bin   u16 [key][snapshot][measure][hour]
-  commute_od_{YYYY-MM}.bin                        top-K AM flows per key, 3 levels
+  commute_meta.json                                     names the files below
+  commute_hourly_{group,tract,bgroup,route}.<hash>.bin  u16 [key][snapshot][measure][hour]
+  commute_od_{YYYY-MM}.<hash>.bin                       top-K AM flows per key, 3 levels
 
 Corridor/section geometry is NOT touched here (that work lives elsewhere).
 """
 import datetime as dt
+import hashlib
 import json
 import os
 import struct
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -51,18 +70,23 @@ CACHE = Path(os.environ.get("ACPRA_CACHE", VIS / "data" / "commute_cache"))
 CACHE.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(REPL))
 from holidays import is_holiday  # noqa: E402
+from build_capture import band_of_hour, start_hour  # noqa: E402
 
 # Raw APC event parquet, partitioned year=/month=. Mirrored as a public
 # HuggingFace dataset -- see the README.
 BUCKET = os.environ.get(
     "ACPRA_BUCKET", "gs://ac-transit-stops/partitioned-final/ac_transit_parquet"
 )
-AM = (5, 9)    # hours 5..8 inclusive
+AM = (5, 9)    # trip start hours 5..8 inclusive
 N_HOURS = 24
 K_GROUP = 48
 K_AREA = 24
 MATCH_MIN = 0.40   # min stop-set Jaccard to accept a route/dir match
 FLOW_MIN = 0.01    # min avg-weekday riders per stop pair to keep
+MIN_STOP_SHARE = 0.05  # a stop joins the O-D sequence if this share of trips serve it
+IMBALANCE_MAX = 5      # |ons - offs| per trip at or above this is screened out (STM's rule)
+MIN_OD_TRIPS = 20      # fewer screened trips than this -> summed fit, no holdout
+TRIP_PASSES = (3, 8)   # candidate pass counts for the per-trip fit
 LEVELS = ["group", "tract", "bgroup", "route"]
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -122,47 +146,65 @@ def fetch_month(y, m):
 
 
 def load_events(y, m):
-    """Capture- and NTD-corrected weekday events for one month (cached)."""
-    out = CACHE / f"corr_{y}_{m:02d}.parquet"
-    if out.exists():
-        return pd.read_parquet(out)
+    """Capture- and NTD-corrected weekday events for one month.
+
+    Not cached: the O-D step needs trip identity and event times, and a
+    corrected copy of every snapshot month would not fit beside the raw cache.
+    """
     path = fetch_month(y, m)
     t = pq.read_table(
         path,
-        columns=["route", "stop_id", "service_date", "event_timestamp",
+        columns=["route", "route_id", "stop_id", "service_date", "event_timestamp",
                  "boardings", "alightings", "door_lift_flags_possibly"],
     ).to_pandas()
-    t = t.dropna(subset=["route", "stop_id"])
+    t = t.dropna(subset=["route", "stop_id", "route_id"])
     d = pd.DatetimeIndex(t.service_date)
     keep = (d.dayofweek < 5) & ~is_holiday(d)
     keep &= (d.year == y) & (d.month == m)
     t = t[keep].copy()
-    t["bit"] = t.door_lift_flags_possibly.astype(int) % 2
+    t["route"] = t.route.astype(str)
+    t["stop_id"] = t.stop_id.astype(str)
+    t["route_id"] = t.route_id.astype(str)
+    t["bit"] = (t.door_lift_flags_possibly.astype(int) % 2).astype(np.int8)
     t["hour"] = pd.DatetimeIndex(t.event_timestamp).hour.astype(np.int8)
+    t["start_hr"] = start_hour(t.route_id).fillna(-1).astype(np.int16)
+    t["band"] = band_of_hour(t.start_hr.clip(lower=0))
     t = t.rename(columns={"boardings": "raw_bd", "alightings": "raw_al"})
 
+    key = ["route", "bit"]
     cap = pd.read_parquet(REPL / "derived" / "capture_table.parquet")
-    cap = cap[(cap.day_type == "Weekday") & (cap.year == y) & (cap["period"] == m)]
-    cap = cap[["route", "bit", "capture", "reliable"]].copy()
+    cap = cap[(cap.day_type == "Weekday") & (cap.year == y) & (cap["period"] == m)].copy()
     cap["bit"] = cap["bit"].astype(np.int8)
     cap["scale"] = np.where(cap.capture > 0, 1.0 / cap.capture.clip(upper=1.0), 1.0)
-    t["bit"] = t["bit"].astype(np.int8)
-    t = t.merge(cap[["route", "bit", "scale", "reliable"]], on=["route", "bit"], how="left")
+    band = pd.read_parquet(REPL / "derived" / "capture_band_table.parquet")
+    band = band[(band.day_type == "Weekday") & (band.year == y) & (band["period"] == m)].copy()
+    band["bit"] = band["bit"].astype(np.int8)
+    band["scale_band"] = np.where(band.capture_band > 0,
+                                  1.0 / band.capture_band.clip(upper=1.0), 1.0)
+    t = t.merge(cap[key + ["scale"]], on=key, how="left")
+    t = t.merge(band[key + ["band", "scale_band", "reliable_band"]],
+                on=key + ["band"], how="left")
     t["scale"] = t["scale"].fillna(1.0)
-    t["reliable"] = t["reliable"].fillna(False)
+    t["scale_band"] = t["scale_band"].fillna(t["scale"])
+    t["reliable_band"] = t["reliable_band"].astype("boolean").fillna(False).astype(bool)
+
+    # band factors fix the shape of the day; the route-month factor keeps
+    # each route-bit's month level, which is what the weekly data carries
+    lvl = (t.assign(month=t.raw_bd * t.scale, banded=t.raw_bd * t.scale_band)
+            .groupby(key)[["month", "banded"]].sum())
+    norm = (lvl.month / lvl.banded).where(lvl.banded > 0, 1.0).rename("band_norm")
+    t = t.join(norm, on=key)
 
     ntd = pd.read_parquet(REPL / "derived" / "ntd_calibration.parquet")
     row = ntd[(ntd.year == y) & (ntd.month == m)]
     ntd_scale = float(row.ntd_scale.iloc[0]) if len(row) else 1.0
 
-    t["bd"] = (t.raw_bd * t.scale * ntd_scale).astype(np.float32)
-    t["al"] = (t.raw_al * t.scale * ntd_scale).astype(np.float32)
-    t["imp"] = ~t.reliable
-    t = t[["route", "bit", "stop_id", "hour", "bd", "al", "imp"]]
-    t["stop_id"] = t.stop_id.astype(str)
-    t["route"] = t.route.astype(str)
-    t.to_parquet(out, index=False)
-    return t
+    s = t.scale_band * t.band_norm * ntd_scale
+    t["bd"] = (t.raw_bd * s).astype(np.float32)
+    t["al"] = (t.raw_al * s).astype(np.float32)
+    t["imp"] = ~t.reliable_band
+    return t[["route", "bit", "stop_id", "service_date", "route_id", "event_timestamp",
+              "hour", "start_hr", "raw_bd", "raw_al", "bd", "al", "imp"]]
 
 
 def weekday_count(y, m):
@@ -194,6 +236,119 @@ def ipf_od(boardings, alightings, max_iter=200, tol=1e-4, backward_weight=0.02):
         if max(np.abs(T.sum(axis=1) - B).max(), np.abs(T.sum(axis=0) - A).max()) < tol:
             break
     return T
+
+
+def balance(B, A):
+    """Scale ons and offs to their mean total along the last axis (TCRP 113's
+    proportional balancing, which leaves average trip length unchanged)."""
+    tb, ta = B.sum(-1, keepdims=True), A.sum(-1, keepdims=True)
+    target = (tb + ta) / 2
+    return (B * np.divide(target, tb, out=np.zeros_like(tb), where=tb > 0),
+            A * np.divide(target, ta, out=np.zeros_like(ta), where=ta > 0))
+
+
+def ipf_batch(T, rows, cols, max_iter=100, tol=1e-4):
+    """Biproportional fit of seeds T (..., n, n) to rows/cols (..., n), in place."""
+    for _ in range(max_iter):
+        rs = T.sum(-1)
+        T *= np.divide(rows, rs, out=np.zeros_like(rs), where=rs > 0)[..., :, None]
+        cs = T.sum(-2)
+        T *= np.divide(cols, cs, out=np.zeros_like(cs), where=cs > 0)[..., None, :]
+        if np.abs(T.sum(-1) - rows).max() < tol:
+            break
+    return T
+
+
+def trip_bases(B, A, passes, backward=1e-3):
+    """Base matrix after each of 1..max(passes) per-trip passes: fit every
+    trip's own counts against the base, rebuild the base from the sum (Ji,
+    Mishalani & McCord 2014). The small upstream weight keeps trips with
+    locally inconsistent counts solvable; only forward mass carries over."""
+    n = B.shape[1]
+    B, A = balance(B, A)
+    i, j = np.indices((n, n))
+    fwd = (i < j).astype(float)
+    up = backward / fwd.sum() * (i > j)
+    base, out = fwd, {}
+    for k in range(1, max(passes) + 1):
+        seed = np.broadcast_to(base / base.sum() + up, (len(B), n, n)).copy()
+        base = ipf_batch(seed, B, A).sum(0) * fwd
+        if k in passes:
+            out[k] = base
+    return out
+
+
+def rake(base, boardings, alightings, backward=1e-3):
+    """Fit a base structure to boarding/alighting totals."""
+    n = len(boardings)
+    b, a = balance(np.asarray(boardings, float), np.asarray(alightings, float))
+    i, j = np.indices((n, n))
+    seed = base + base.mean() * (backward * (i > j) + 1e-9 * (i < j))
+    return ipf_batch(seed, b, a, max_iter=500, tol=1e-6)
+
+
+def holdout_rmse(T, B, A):
+    """Predict each trip's alightings from its boardings, B @ P(alight | board)."""
+    rs = T.sum(1, keepdims=True)
+    P = np.divide(T, rs, out=np.zeros_like(T), where=rs > 0)
+    B, A = balance(B, A)
+    return float(np.sqrt(((B @ P - A) ** 2).mean()))
+
+
+def choose_passes(B, A, day):
+    """0 (summed fit) or a per-trip pass count, by odd/even-day holdout."""
+    folds = (day % 2 == 0, day % 2 == 1)
+    if len(B) < MIN_OD_TRIPS or min(f.sum() for f in folds) < 5:
+        return 0
+    score = dict.fromkeys((0,) + TRIP_PASSES, 0.0)
+    for train in folds:
+        test = ~train
+        b, a = B[train].sum(0), A[train].sum(0)
+        score[0] += holdout_rmse(ipf_od(b, a), B[test], A[test])
+        for k, base in trip_bases(B[train], A[train], TRIP_PASSES).items():
+            score[k] += holdout_rmse(rake(base, b, a), B[test], A[test])
+    return min(score, key=score.get)
+
+
+def route_od(ev, nwd):
+    """AM stop-to-stop flows (avg-weekday riders) for one (route, bit).
+
+    Returns (stop sequence, flow matrix, passes used, AM riders kept), or None.
+    """
+    ev = ev[(ev.start_hr >= AM[0]) & (ev.start_hr < AM[1])]
+    if ev.empty:
+        return None
+    trip, trips = pd.factorize(ev.service_date.astype(str) + "|" + ev.route_id)
+    t0 = ev.groupby(trip).event_timestamp.transform("min")
+    mins = (ev.event_timestamp - t0).dt.total_seconds().to_numpy()
+    stops = (pd.DataFrame({"stop": ev.stop_id.to_numpy(), "mins": mins, "trip": trip})
+               .groupby("stop").agg(pos=("mins", "median"), n=("trip", "nunique")))
+    seq = stops[stops.n >= MIN_STOP_SHARE * len(trips)].sort_values("pos").index
+    n = len(seq)
+    if n < 2:
+        return None
+    k = pd.Series(np.arange(n), index=seq).reindex(ev.stop_id).to_numpy()
+    on = ~np.isnan(k)
+    k, tr = k[on].astype(np.int64), trip[on]
+    evk = ev[on]
+    B = np.zeros((len(trips), n))
+    A = np.zeros_like(B)
+    np.add.at(B, (tr, k), evk.raw_bd.to_numpy())
+    np.add.at(A, (tr, k), evk.raw_al.to_numpy())
+    bvec = np.bincount(k, weights=evk.bd.to_numpy(), minlength=n) / nwd
+    avec = np.bincount(k, weights=evk.al.to_numpy(), minlength=n) / nwd
+    if bvec.sum() < 0.5 or avec.sum() < 0.5:
+        return None
+
+    tb, ta = B.sum(1), A.sum(1)
+    ok = (tb > 0) & (np.abs(tb - ta) < IMBALANCE_MAX)
+    day = pd.to_datetime(pd.Series(trips).str[:10]).dt.day.to_numpy()
+    passes = choose_passes(B[ok], A[ok], day[ok])
+    if passes == 0:
+        T = ipf_od(bvec, avec)
+    else:
+        T = rake(trip_bases(B[ok], A[ok], (passes,))[passes], bvec, avec)
+    return list(seq), T, passes, float(bvec.sum())
 
 
 def era_sequences(era):
@@ -249,6 +404,22 @@ def topk_lists(matrix, n, k):
     return ins, outs
 
 
+def publish(name, data):
+    """Write a bundle file under a content-addressed name and return it.
+
+    The bucket serves every object with a one-day cache, and the binaries are
+    only readable with the offsets and scales in the commute_meta.json that
+    was built with them. Hashed names mean a cached meta always points at its
+    own binaries, which stay in the bucket, never at a later build's.
+    """
+    stem, ext = name.rsplit(".", 1)
+    for old in [PACK / name, *PACK.glob(f"{stem}.*.{ext}")]:
+        old.unlink(missing_ok=True)
+    final = f"{stem}.{hashlib.sha1(data).hexdigest()[:10]}.{ext}"
+    (PACK / final).write_bytes(data)
+    return final
+
+
 def write_od(name, per_level, sizes, ks):
     """Per level, per key: u8 inCount + entries, u8 outCount + entries."""
     blob = bytearray()
@@ -264,8 +435,7 @@ def write_od(name, per_level, sizes, ks):
             for other, flow in outs[key]:
                 blob += struct.pack("<Hf", other, flow)
         offsets[lv]["bytes"] = len(blob) - offsets[lv]["offset"]
-    (PACK / name).write_bytes(bytes(blob))
-    return offsets, (PACK / name).stat().st_size
+    return offsets, publish(name, bytes(blob)), len(blob)
 
 
 def main():
@@ -309,6 +479,7 @@ def main():
     g2b = dict(zip(stops.group_id[okb].astype(int), stops.bgroup_ix[okb].astype(int)))
 
     seq_cache = {}
+    pool = ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 2))
     for p, (y, m) in enumerate(anchors):
         label = f"{MONTH_NAMES[m - 1]} {y}"
         ev = load_events(y, m)
@@ -345,26 +516,21 @@ def main():
             idx = (rk * (n_p * 48) + p * 48 + meas * 24 + evr.hour.to_numpy())
             np.add.at(hourly["route"], idx, evr[col].to_numpy())
 
-        unmatched = sorted(set(ev.route.unique()) - set(alias))
-        unmatched_bd = float(ev[ev.route.isin(unmatched)].bd.sum())
-        total_bd = float(ev.bd.sum())
-        coverage = 1 - unmatched_bd / max(total_bd, 1)
+        am_ev = ev[(ev.start_hr >= AM[0]) & (ev.start_hr < AM[1])]
+        total_am = float(am_ev.bd.sum()) / nwd
 
         matrices = {lv: {} for lv in ("group", "tract", "bgroup")}
         grp = stops.group_id
-        for (route, bit), key in sorted(assign.items()):
-            seq = seqs[key]
-            evp = ev[(ev.route == route) & (ev.bit == bit)
-                     & (ev.hour >= AM[0]) & (ev.hour < AM[1])]
-            if evp.empty:
+        kept_am, chosen = 0.0, {}
+        # biggest route-bits first so the pool finishes evenly
+        groups = sorted((g for _, g in am_ev.groupby(["route", "bit"], sort=True)),
+                        key=len, reverse=True)
+        for res in pool.map(route_od, groups, [nwd] * len(groups)):
+            if res is None:
                 continue
-            bm = evp.groupby("stop_id").bd.sum() / nwd
-            am_ = evp.groupby("stop_id").al.sum() / nwd
-            bvec = bm.reindex(seq).fillna(0.0).to_numpy()
-            avec = am_.reindex(seq).fillna(0.0).to_numpy()
-            if bvec.sum() < 0.5 or avec.sum() < 0.5:
-                continue
-            T = ipf_od(bvec, avec)
+            seq, T, passes, kept = res
+            kept_am += kept
+            chosen[passes] = chosen.get(passes, 0) + 1
             ii, jj = np.nonzero(T > FLOW_MIN)
             g1s = [grp.get(seq[i]) for i in ii]
             g2s = [grp.get(seq[j]) for j in jj]
@@ -385,13 +551,17 @@ def main():
         anchor_id = f"{y}-{m:02d}"
         per_level = {lv: topk_lists(matrices[lv], sizes[lv], ks[lv])
                      for lv in ("group", "tract", "bgroup")}
-        offsets, size = write_od(f"commute_od_{anchor_id}.bin", per_level, sizes, ks)
-        od_meta[anchor_id] = {"am": {"file": f"commute_od_{anchor_id}.bin",
-                                     "levels": offsets}}
+        offsets, od_file, size = write_od(f"commute_od_{anchor_id}.bin", per_level, sizes, ks)
+        od_meta[anchor_id] = {"am": {"file": od_file, "levels": offsets}}
+        coverage = kept_am / max(total_am, 1e-9)
         period_meta[p]["odCoverage"] = round(coverage, 3)
-        print(f"  {label}: {len(assign)} (route,bit) matches, "
-              f"unmatched routes {unmatched_bd / max(total_bd, 1):.1%} of bd, "
-              f"od {size / 1e6:.2f} MB")
+        fits = ", ".join(f"{'summed' if k == 0 else f'{k} passes'}: {v}"
+                         for k, v in sorted(chosen.items()))
+        print(f"  {label}: {sum(chosen.values())} route-bits ({fits}); "
+              f"O-D covers {coverage:.1%} of AM boardings, od {size / 1e6:.2f} MB",
+              flush=True)
+
+    pool.shutdown()
 
     # ---- write hourly bins ----
     hourly_section = {}
@@ -400,8 +570,7 @@ def main():
         mx = arr.reshape(arr.shape[0], -1).max(axis=1)
         scale = np.where(mx > 0, mx / 65535.0, 1.0).astype(np.float64)
         q = np.round(arr / scale[:, None, None, None]).clip(0, 65535).astype("<u2")
-        name = f"commute_hourly_{lv}.bin"
-        (PACK / name).write_bytes(q.tobytes())
+        name = publish(f"commute_hourly_{lv}.bin", q.tobytes())
         hourly_section[lv] = {
             "file": name,
             "n": sizes[lv],

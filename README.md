@@ -113,12 +113,24 @@ live in sibling repositories not published here; point `ACPRA_ROOT` at a
 checkout that has them, or set `ACPRA_REPLICATE` and `ACPRA_VIS` individually.
 `ACPRA_BUCKET` overrides the raw-data source.
 
-O–D flows are inferred, not observed. Each route–direction's AM boarding and
-alighting totals are used as the marginals of an iterative proportional
-fitting (Furness) problem over the stop sequence, with a small weight allowed
-for backward travel. The result is the most even flow matrix consistent with
-the counts — it is a reasonable picture of where a corridor's morning riders
-are going in aggregate, not a record of any individual trip.
+O–D flows are inferred, not observed. For each route–direction, stops are
+ordered by how far into the trip the buses reach them, and every morning
+trip's own boarding and alighting counts are fitted against a shared flow
+matrix. The matrix is then rebuilt from the summed fits, over a few rounds
+(iterative proportional fitting with an iteratively improved base, after Ji,
+Mishalani & McCord 2014). Using trips one at a time keeps the information in
+which stops fill up together on the same bus. Summing the whole month first
+gives the most even matrix consistent with the totals, and that simpler fit
+is still used where a held-out test on alternate days prefers it: thin
+routes, and some with loops. The result is a reasonable picture of where a
+corridor's morning riders are going in aggregate, not a record of any
+individual trip.
+
+Counts in the commute view are corrected for counter coverage by time of day
+(early, AM peak, midday, PM peak, evening), because counters fail more often
+at some hours than others. Weekly counts are spread from month totals to days
+with the proportional Denton method, so they move smoothly across month
+boundaries rather than stepping.
 
 ## Deployment
 
