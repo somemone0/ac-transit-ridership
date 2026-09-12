@@ -215,6 +215,14 @@ export async function loadVisualizationData() {
   } catch {
     data.commute = null;
   }
+  // LODES all-commuter marginals per tract (scripts/build_lodes_pack.py).
+  // Optional: an older bundle without the file still works, the commute view
+  // just hides the LODES and compare modes.
+  try {
+    data.lodes = await getJson("lodes.json");
+  } catch {
+    data.lodes = null;
+  }
   return data;
 }
 
@@ -701,6 +709,8 @@ export function commuteStats(commute, level, key, p) {
   return {
     total,
     baseTotal,
+    amIn,
+    amOut,
     amNet: total > 0 ? (amIn - amOut) / total : NaN,
     pmNet: total > 0 ? (pmOut - pmIn) / total : NaN,
     peakRatio: daySum > 0 ? maxValue / (daySum / 16) : NaN,
@@ -721,4 +731,40 @@ export function commuteDomain(commute, level, p) {
   const domain = values.length ? values[Math.floor(values.length * 0.98)] : 1;
   commute.commuteDomains[cacheKey] = domain;
   return domain;
+}
+
+/* ------------------------------------------------------------------ lodes */
+/* LEHD LODES8 OD main tables (JT01 primary jobs) aggregated to tracts by
+   scripts/build_lodes_pack.py: jobs = primary jobs located in the tract,
+   workers = employed residents. Values align with meta.json's tracts array.
+   The commute snapshots are half-year months; the LODES year is the snapshot
+   year clamped to what LEHD has published. */
+
+export function lodesYearFor(lodes, periodId) {
+  const year = Number(periodId.slice(0, 4));
+  const years = lodes.years;
+  return Math.min(Math.max(year, years[0]), years[years.length - 1]);
+}
+
+export function lodesAt(lodes, field, year, key) {
+  const row = lodes[field]?.[year];
+  return row && key < row.length ? row[key] : 0;
+}
+
+// System-wide AM arrivals per tract for one snapshot, cached per period: the
+// denominators of the compare-mode multiplier.
+export function lodesArrivals(commute, level, p) {
+  const cache = commute.arrivalCache || (commute.arrivalCache = {});
+  const cacheKey = `${level}|${p}`;
+  if (cache[cacheKey]) return cache[cacheKey];
+  const store = commute.hourly[level];
+  const arrivals = new Float64Array(store.n);
+  let sum = 0;
+  for (let key = 0; key < store.n; key += 1) {
+    const stats = commuteStats(commute, level, key, p);
+    arrivals[key] = stats ? stats.amIn : 0;
+    sum += arrivals[key];
+  }
+  cache[cacheKey] = { arrivals, sum };
+  return cache[cacheKey];
 }

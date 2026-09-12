@@ -25,7 +25,14 @@ binary bundle the browser can page through without a server round trip.
   because stop sequences changed between them.
 - **Commute patterns** — average-weekday hourly boarding and alighting
   profiles, plus inferred origin–destination flows for AM (5–9 a.m.) travel,
-  at half-year snapshots from Feb 2019 to the present.
+  at half-year snapshots from Feb 2019 to the present. Three lenses on the
+  same map: **AC Transit commuters** (the inferred flows), **All commuters**
+  (LEHD LODES primary jobs per tract, one year per snapshot), and **Compare**
+  — each tract's share of morning AC arrivals divided by its share of LODES
+  jobs, so 1× means bus commuters arrive in proportion to jobs. The LODES
+  modes are tract-level (that is what LODES publishes); UC employees are
+  absent from LODES because the university sits outside State UI coverage,
+  so Berkeley's campus tract reads far emptier than it is.
 - **Median household income** by tract and block group (ACS 5-year, 2024,
   table B19013) as an overlay.
 
@@ -72,6 +79,13 @@ and the `.bin` / `.u16` / `.u8` files are flat typed arrays it describes.
 Objects are stored gzipped (58 MB → 33 MB on the wire) with a one-day cache
 lifetime.
 
+`lodes.json` is the one optional file the commute view's *All commuters* and
+*Compare* modes read: LODES8 OD main tables (JT01 primary jobs) aggregated to
+the app's 414 tracts, for 2019–2023, aligned with `meta.json`'s tracts array.
+Build it with `scripts/build_lodes_pack.py` (downloads ~85 MB per year into
+`vis/data/lodes_cache`, then sums by workplace and residence tract). A bundle
+without it still works — those two modes just show a pointer to this script.
+
 ### Raw APC extracts
 
 The underlying event-level data is published as a HuggingFace dataset:
@@ -111,7 +125,10 @@ that could identify a rider or a driver.
 needs two intermediates (the capture-rate table and the NTD calibration) that
 live in sibling repositories not published here; point `ACPRA_ROOT` at a
 checkout that has them, or set `ACPRA_REPLICATE` and `ACPRA_VIS` individually.
-`ACPRA_BUCKET` overrides the raw-data source.
+`ACPRA_BUCKET` overrides the raw-data source. `scripts/build_lodes_pack.py`
+builds `lodes.json` (no sibling dependencies, only census.gov access). For
+deployment both need uploading to the pack bucket and a line in its
+`manifest.json`.
 
 O–D flows are inferred, not observed. For each route–direction, stops are
 ordered by how far into the trip the buses reach them, and every morning
