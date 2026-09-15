@@ -31,13 +31,20 @@ O-D inference, per (route, bit) for trips starting 5-9 a.m.:
     totals, and stop-to-stop flows are aggregated to stop-group / tract /
     block-group pairs.
 Top-K lists per key are written per snapshot; the client fetches one
-snapshot's file on demand. PM O-D is not built — the AM matrix carries the
+snapshot's file on demand. Only the AM matrix is shipped — it carries the
 commute story in both directions (in-list = who arrives here, out-list = who
 leaves here).
+
+A second, evening pass (PM_WORK) is inferred but not shipped. It exists only
+to score which morning trips come back, because a morning arrival on its own
+cannot tell a commuter from a shopper, a student or someone changing to BART.
+See round_trip() for the statistic and why it nets the two directions against
+each other; the per-key totals are all that is written out.
 
 Outputs (nextjsvis/public/data/pack/):
   commute_meta.json                                     names the files below
   commute_hourly_{group,tract,bgroup,route}.<hash>.bin  u16 [key][snapshot][measure][hour]
+  commute_rt_{group,tract,bgroup}.<hash>.bin            u16 [key][snapshot][workplace, home]
   commute_od_{YYYY-MM}.<hash>.bin                       top-K AM flows per key, 3 levels
 
 Corridor/section geometry is NOT touched here (that work lives elsewhere).
@@ -78,6 +85,13 @@ BUCKET = os.environ.get(
     "ACPRA_BUCKET", "gs://ac-transit-stops/partitioned-final/ac_transit_parquet"
 )
 AM = (5, 9)    # trip start hours 5..8 inclusive
+# Evening window used only to score which morning trips come back. It starts
+# at 16 rather than 15 on purpose: schools dismiss 13-16 and their round trips
+# mirror as cleanly as commutes do, so the earlier hour pulls Skyline High and
+# Montera Jr High into the workplace ranking. Measured against LODES
+# workplace-ness (log jobs/resident workers), 16-19 scores rho 0.45 where
+# 15-19 scores 0.35 and raw AM arrivals score 0.22.
+PM_WORK = (16, 19)
 N_HOURS = 24
 K_GROUP = 48
 K_AREA = 24
@@ -88,6 +102,7 @@ IMBALANCE_MAX = 5      # |ons - offs| per trip at or above this is screened out 
 MIN_OD_TRIPS = 20      # fewer screened trips than this -> summed fit, no holdout
 TRIP_PASSES = (3, 8)   # candidate pass counts for the per-trip fit
 LEVELS = ["group", "tract", "bgroup", "route"]
+RT_LEVELS = ["group", "tract", "bgroup"]   # round-trip scores; routes have no O-D
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 # era whose GTFS stop sequences match an anchor date (matches vis eras)
@@ -310,12 +325,15 @@ def choose_passes(B, A, day):
     return min(score, key=score.get)
 
 
-def route_od(ev, nwd):
-    """AM stop-to-stop flows (avg-weekday riders) for one (route, bit).
+def route_od(ev, nwd, window=AM):
+    """Stop-to-stop flows (avg-weekday riders) for one (route, bit).
 
-    Returns (stop sequence, flow matrix, passes used, AM riders kept), or None.
+    `window` is the trip-start hour range: AM for the shipped commute matrix,
+    PM_WORK when scoring which of those morning trips return in the evening.
+
+    Returns (stop sequence, flow matrix, passes used, riders kept), or None.
     """
-    ev = ev[(ev.start_hr >= AM[0]) & (ev.start_hr < AM[1])]
+    ev = ev[(ev.start_hr >= window[0]) & (ev.start_hr < window[1])]
     if ev.empty:
         return None
     trip, trips = pd.factorize(ev.service_date.astype(str) + "|" + ev.route_id)
@@ -420,6 +438,76 @@ def publish(name, data):
     return final
 
 
+def window_matrices(ev, nwd, window, stops, g2t, g2b, pool):
+    """Inferred flows for one trip-start window, at all three area levels.
+
+    Returns (matrices, window riders/weekday, riders kept by the fit, pass
+    counts chosen). Lifted out of main so the evening pass can reuse it.
+    """
+    sub = ev[(ev.start_hr >= window[0]) & (ev.start_hr < window[1])]
+    total = float(sub.bd.sum()) / nwd
+    matrices = {lv: {} for lv in ("group", "tract", "bgroup")}
+    grp = stops.group_id
+    kept_sum, chosen = 0.0, {}
+    # biggest route-bits first so the pool finishes evenly
+    groups = sorted((g for _, g in sub.groupby(["route", "bit"], sort=True)),
+                    key=len, reverse=True)
+    n = len(groups)
+    for res in pool.map(route_od, groups, [nwd] * n, [window] * n):
+        if res is None:
+            continue
+        seq, T, passes, kept = res
+        kept_sum += kept
+        chosen[passes] = chosen.get(passes, 0) + 1
+        ii, jj = np.nonzero(T > FLOW_MIN)
+        g1s = [grp.get(seq[i]) for i in ii]
+        g2s = [grp.get(seq[j]) for j in jj]
+        for g1, g2, flow in zip(g1s, g2s, T[ii, jj]):
+            if pd.isna(g1) or pd.isna(g2) or g1 == g2 or g1 < 0 or g2 < 0:
+                continue
+            d = matrices["group"]
+            d[(int(g1), int(g2))] = d.get((int(g1), int(g2)), 0.0) + float(flow)
+    for (u, v), flow in matrices["group"].items():
+        tu, tv = g2t.get(u), g2t.get(v)
+        if tu is not None and tv is not None and tu != tv:
+            matrices["tract"][(tu, tv)] = matrices["tract"].get((tu, tv), 0.0) + flow
+        bu, bv = g2b.get(u), g2b.get(v)
+        if bu is not None and bv is not None and bu != bv:
+            matrices["bgroup"][(bu, bv)] = matrices["bgroup"].get((bu, bv), 0.0) + flow
+    return matrices, total, kept_sum, chosen
+
+
+def round_trip(am, pm, n):
+    """Net round-trip riders per key: (workplace end, home end).
+
+    A morning i->j trip counts as commuting only if it comes back as an
+    evening j->i trip, so the paired volume is min(AM[i->j], PM[j->i]) -- on
+    shares of each window's own total, because the evening carries about 1.4x
+    the morning's riders and levels would not be comparable.
+
+    Subtracting the same quantity for the opposite story, min(AM[j->i],
+    PM[i->j]), is what makes this a workplace measure rather than a busyness
+    one. Buses run both ways all day, so the fit hands nearly every busy pair
+    a return leg; without the subtraction a two-way corridor scores at both
+    ends and the ranking fills with tracts that have few jobs and many
+    residents. A symmetric all-day corridor now cancels to about zero, while a
+    genuine commute pair keeps its volume and its sign.
+    """
+    am_tot, pm_tot = sum(am.values()), sum(pm.values())
+    if not (am_tot > 0 and pm_tot > 0):
+        return np.zeros(n), np.zeros(n)
+    am_s = {k: v / am_tot for k, v in am.items()}
+    pm_s = {k: v / pm_tot for k, v in pm.items()}
+    work, home = np.zeros(n), np.zeros(n)
+    for (i, j), f in am_s.items():
+        net = (min(f, pm_s.get((j, i), 0.0))
+               - min(am_s.get((j, i), 0.0), pm_s.get((i, j), 0.0)))
+        if net > 0:
+            work[j] += net
+            home[i] += net
+    return work * am_tot, home * am_tot
+
+
 def write_od(name, per_level, sizes, ks):
     """Per level, per key: u8 inCount + entries, u8 outCount + entries."""
     blob = bytearray()
@@ -469,6 +557,9 @@ def main():
 
     hourly = {lv: np.zeros(sizes[lv] * n_p * 2 * N_HOURS, dtype=np.float64)
               for lv in LEVELS}
+    # net round-trip riders per key/snapshot: [key][snapshot][workplace, home]
+    rt = {lv: np.zeros((sizes[lv], n_p, 2), dtype=np.float64)
+          for lv in RT_LEVELS}
     period_meta = []
     od_meta = {}
 
@@ -516,37 +607,21 @@ def main():
             idx = (rk * (n_p * 48) + p * 48 + meas * 24 + evr.hour.to_numpy())
             np.add.at(hourly["route"], idx, evr[col].to_numpy())
 
-        am_ev = ev[(ev.start_hr >= AM[0]) & (ev.start_hr < AM[1])]
-        total_am = float(am_ev.bd.sum()) / nwd
+        matrices, total_am, kept_am, chosen = window_matrices(
+            ev, nwd, AM, stops, g2t, g2b, pool)
 
-        matrices = {lv: {} for lv in ("group", "tract", "bgroup")}
-        grp = stops.group_id
-        kept_am, chosen = 0.0, {}
-        # biggest route-bits first so the pool finishes evenly
-        groups = sorted((g for _, g in am_ev.groupby(["route", "bit"], sort=True)),
-                        key=len, reverse=True)
-        for res in pool.map(route_od, groups, [nwd] * len(groups)):
-            if res is None:
-                continue
-            seq, T, passes, kept = res
-            kept_am += kept
-            chosen[passes] = chosen.get(passes, 0) + 1
-            ii, jj = np.nonzero(T > FLOW_MIN)
-            g1s = [grp.get(seq[i]) for i in ii]
-            g2s = [grp.get(seq[j]) for j in jj]
-            flows = T[ii, jj]
-            for g1, g2, flow in zip(g1s, g2s, flows):
-                if pd.isna(g1) or pd.isna(g2) or g1 == g2 or g1 < 0 or g2 < 0:
-                    continue
-                d = matrices["group"]
-                d[(int(g1), int(g2))] = d.get((int(g1), int(g2)), 0.0) + float(flow)
-        for (u, v), flow in list(matrices["group"].items()):
-            tu, tv = g2t.get(u), g2t.get(v)
-            if tu is not None and tv is not None and tu != tv:
-                matrices["tract"][(tu, tv)] = matrices["tract"].get((tu, tv), 0.0) + flow
-            bu, bv = g2b.get(u), g2b.get(v)
-            if bu is not None and bv is not None and bu != bv:
-                matrices["bgroup"][(bu, bv)] = matrices["bgroup"].get((bu, bv), 0.0) + flow
+        # The evening pass is scored, never shipped: only the per-key round-trip
+        # totals below survive it, which is a few hundred KB against the ~12 MB
+        # a second set of O-D binaries would add.
+        evening, total_pm, _, _ = window_matrices(
+            ev, nwd, PM_WORK, stops, g2t, g2b, pool)
+        for lv in RT_LEVELS:
+            work, home = round_trip(matrices[lv], evening[lv], sizes[lv])
+            rt[lv][:, p, 0] = work
+            rt[lv][:, p, 1] = home
+        print(f"    evening {PM_WORK[0]}-{PM_WORK[1]}: {total_pm:,.0f} riders/wkday; "
+              f"round-trip {rt['tract'][:, p, 0].sum():,.0f} of {total_am:,.0f} AM "
+              f"({rt['tract'][:, p, 0].sum() / max(total_am, 1e-9):.0%})", flush=True)
 
         anchor_id = f"{y}-{m:02d}"
         per_level = {lv: topk_lists(matrices[lv], sizes[lv], ks[lv])
@@ -579,12 +654,31 @@ def main():
         }
         print(f"  {name} {(PACK / name).stat().st_size / 1e6:.2f} MB")
 
+    # ---- write round-trip bins ----
+    # Same u16-plus-per-key-scale shape as the hourly bins, one sixth their
+    # size: [key][snapshot][workplace, home].
+    rt_section = {}
+    for lv in RT_LEVELS:
+        arr = rt[lv]
+        mx = arr.reshape(arr.shape[0], -1).max(axis=1)
+        scale = np.where(mx > 0, mx / 65535.0, 1.0).astype(np.float64)
+        q = np.round(arr / scale[:, None, None]).clip(0, 65535).astype("<u2")
+        name = publish(f"commute_rt_{lv}.bin", q.tobytes())
+        rt_section[lv] = {
+            "file": name,
+            "n": sizes[lv],
+            "nP": n_p,
+            "scales": [round(float(v), 6) for v in scale],
+        }
+        print(f"  {name} {(PACK / name).stat().st_size / 1e3:.0f} KB")
+
     out = {
         "periods": period_meta,
         "latest": f"{latest[0]}-{latest[1]:02d}",
         "base": "2020-02",
-        "windows": {"am": list(AM), "pm": (15, 19)},
+        "windows": {"am": list(AM), "pm": (15, 19), "pmWork": list(PM_WORK)},
         "hourly": hourly_section,
+        "rt": rt_section,
         "od": od_meta,
     }
     (PACK / "commute_meta.json").write_text(json.dumps(out, separators=(",", ":")))

@@ -25,14 +25,31 @@ binary bundle the browser can page through without a server round trip.
   because stop sequences changed between them.
 - **Commute patterns** — average-weekday hourly boarding and alighting
   profiles, plus inferred origin–destination flows for AM (5–9 a.m.) travel,
-  at half-year snapshots from Feb 2019 to the present. Three lenses on the
-  same map: **AC Transit commuters** (the inferred flows), **All commuters**
-  (LEHD LODES primary jobs per tract, one year per snapshot), and **Compare**
-  — each tract's share of morning AC arrivals divided by its share of LODES
-  jobs, so 1× means bus commuters arrive in proportion to jobs. The LODES
-  modes are tract-level (that is what LODES publishes); UC employees are
-  absent from LODES because the university sits outside State UI coverage,
-  so Berkeley's campus tract reads far emptier than it is.
+  at half-year snapshots from Feb 2019 to the present. The map is driven by a
+  2×2 grid of measures: **AC Transit workplaces / homes** (bus commuters) over
+  **All workplaces / All homes** (LEHD LODES primary jobs and employed
+  residents per tract, one year per snapshot). Pick one cell to map how
+  concentrated those commuters are; pick both cells of a column to map the
+  ratio of the two concentrations, where 1× means bus commuters are
+  distributed in proportion to all commuters.
+
+  The AC Transit row counts *net round-trip* commuters rather than everyone
+  who steps off a bus in the morning: a morning arrival alone cannot separate
+  a commuter from a shopper, a student, or someone changing to BART, so a trip
+  counts only when the same pair comes back in the evening (16–19), netted
+  against the same pair's opposite direction so that an all-day two-way
+  corridor scores near zero. Against LODES workplace-ness — log(jobs ÷
+  resident workers) — this scores ρ 0.45 where raw morning arrivals score
+  0.22, and it holds that across the 2019, 2023 and 2026 snapshots while raw
+  arrivals decay. The evening window starts at 16:00 on purpose: schools
+  dismiss 13–16 and their round trips mirror as cleanly as commutes do.
+
+  The LODES cells are tract-level (that is what LODES publishes). UC
+  employees are absent from LODES because the university sits outside State
+  UI coverage, so Berkeley's campus tract reads far emptier than it is on the
+  All-workplaces cell — while the AC round-trip cell ranks it a top-five
+  destination, which is a good illustration of what each side can and cannot
+  see.
 - **Median household income** by tract and block group (ACS 5-year, 2024,
   table B19013) as an overlay.
 

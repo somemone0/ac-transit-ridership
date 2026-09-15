@@ -13,8 +13,14 @@ import {
   SEQ_MAGENTA,
   colorFor,
   commuteDomain,
+  COMMUTE_MIN,
+  divT,
+  seqT,
   commuteHourly,
   commuteODLists,
+  commuteRt,
+  commuteRtDomain,
+  commuteRtTotals,
   commuteRegionLists,
   commuteStats,
   corridorColor,
@@ -103,30 +109,34 @@ function StatRows({ data, level, keyIndex, week }) {
   );
 }
 
-function LodesRows({ data, keyIndex, periodIdx, mode }) {
-  const lodes = data.lodes;
-  if (!lodes || (mode !== "lodes" && mode !== "compare")) return null;
-  const year = lodesYear(data, periodIdx);
-  const jobs = lodesAt(lodes, "jobs", year, keyIndex);
-  const workers = lodesAt(lodes, "workers", year, keyIndex);
-  const arrivals = lodesArrivals(data.commute, "tract", periodIdx).arrivals[keyIndex];
-  const lq = jobs > 0 && compareLq(data, keyIndex, periodIdx, jobs);
+function CommuteCellRows({ data, level, keyIndex, periodIdx, cells }) {
+  if (!data.commute) return null;
+  const usable = cells.filter((cell) => !cellIsTractOnly(cell) || level === "tract");
+  if (!usable.length) return null;
+  const ratio = commuteCellRatio(data, level, keyIndex, periodIdx, usable);
   return (
     <>
-      <h4>All commuters · LODES {year}</h4>
+      <h4>Commuters · {data.commute.meta.periods[periodIdx].label}</h4>
       <div style={{ marginBottom: 6 }}>
-        <Row label="Primary jobs">{fmt(jobs)}</Row>
-        <Row label="Employed residents">{fmt(workers)}</Row>
-        <Row label="AC arrivals / weekday">{fmt(arrivals)}</Row>
-        <Row label="Workplace multiplier">
-          {Number.isFinite(lq) ? `${lq.toFixed(2)}×` : "-"}
-        </Row>
+        {usable.map((cell) => {
+          const value = cellValue(data, level, keyIndex, periodIdx, cell);
+          const share = cellShare(data, level, keyIndex, periodIdx, cell);
+          return (
+            <Row key={cell} label={COMMUTE_CELLS[cell].label}>
+              {value === null ? "-" : fmt(value)}
+              {Number.isFinite(share) ? ` · ${(100 * share).toFixed(2)}%` : ""}
+            </Row>
+          );
+        })}
+        {Number.isFinite(ratio) ? (
+          <Row label="Concentration ratio">{`${ratio.toFixed(2)}×`}</Row>
+        ) : null}
       </div>
     </>
   );
 }
 
-function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, commuteMode }) {
+function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, commuteCells }) {
   const { meta } = data;
   const { lv: level, key: keyIndex } = detail;
   const group = meta.stop_groups;
@@ -143,9 +153,13 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
       </div>
       <h4>Weekly ridership 2019-2026</h4>
       <SeriesChart series={series} meta={meta} />
-      {level === "tract" ? (
-        <LodesRows data={data} keyIndex={keyIndex} periodIdx={periodIdx} mode={commuteMode} />
-      ) : null}
+      <CommuteCellRows
+        data={data}
+        level={level}
+        keyIndex={keyIndex}
+        periodIdx={periodIdx}
+        cells={commuteCells}
+      />
       <CommutePanel
         data={data}
         commute={commute}
@@ -302,7 +316,7 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
   );
 }
 
-function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange, onClose, commute, periodIdx, commuteMode }) {
+function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange, onClose, commute, periodIdx, commuteCells }) {
   return (
     <aside id="detailPanel">
       <div className="cp-head">
@@ -329,14 +343,14 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
           onRouteClick={onRouteClick}
           commute={commute}
           periodIdx={periodIdx}
-          commuteMode={commuteMode}
+          commuteCells={commuteCells}
         />
       )}
     </aside>
   );
 }
 
-function Legend({ data, view, level, recThresh, commute, commuteMode, period, commuteFocus, commuteFocusMode, focusMax }) {
+function Legend({ data, view, level, recThresh, commute, commuteCells, period, commuteFocus, commuteFocusMode, focusMax }) {
   if (!data) return null;
   const { meta } = data;
   const bar = (colors) => (
@@ -388,47 +402,37 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
         </>
       );
     }
-    if (commuteMode === "peaks") {
+    const single = commuteCells.length === 1;
+    const missing = commuteCells.filter(
+      (cell) => cellIsTractOnly(cell) && (level !== "tract" || !data.lodes),
+    );
+    if (missing.length) {
       return (
-        <>
-          {bar(SEQ_BLUE)}
-          {labels("flat all day", "sharp AM+PM peaks")}
-          <p className="hint">Peak-hour riding vs the daytime average — which places have commuting peaks. Size still encodes volume.</p>
-        </>
+        <p className="hint">
+          {COMMUTE_CELLS[missing[0]].label} needs <code>lodes.json</code> at tract level,
+          which this bundle does not carry — run scripts/build_lodes_pack.py and sync
+          the pack.
+        </p>
       );
     }
-    if (commuteMode === "lodes") {
-      if (!data.lodes) {
-        return <p className="hint">LODES data is not in this bundle — run scripts/build_lodes_pack.py and sync the pack.</p>;
-      }
-      const year = lodesYear(data, data.commute.meta.periods.indexOf(period));
+    const year = lodesYear(data, data.commute.meta.periods.indexOf(period));
+    const names = orderCells(commuteCells).map((cell) => COMMUTE_CELLS[cell].label);
+    const roundTrip = !!data.commute.rt;
+    if (single) {
+      const cell = commuteCells[0];
       return (
         <>
-          {bar(SEQ_BLUE)}
-          {labels("0", `${fmt(lodesDomain(data.lodes, year))}+ jobs`)}
+          {bar(SEQ_MAGENTA)}
+          {labels("0", `${fmt(cellDomain(data, level, data.commute.meta.periods.indexOf(period), cell))}+`)}
           <p className="hint">
-            All commuters, not just bus riders: LODES primary jobs by workplace
-            tract, {year} — the snapshot year, clamped to what LEHD has published.
-            Grey: no published jobs. Scrub the time bar to move between years.
-          </p>
-        </>
-      );
-    }
-    if (commuteMode === "compare") {
-      if (!data.lodes) {
-        return <p className="hint">LODES data is not in this bundle — run scripts/build_lodes_pack.py and sync the pack.</p>;
-      }
-      const year = lodesYear(data, data.commute.meta.periods.indexOf(period));
-      return (
-        <>
-          {bar(DIVERGING)}
-          {labels("¼×", "4×")}
-          <p className="hint">
-            Workplace multiplier: the tract's share of morning AC Transit arrivals
-            ÷ its share of LODES primary jobs ({year}). 1× = bus commuters arrive
-            in proportion to jobs. Red: draws more bus commuters than its job
-            share suggests; blue: fewer — often BART-served or car territory.
-            Grey: under {COMPARE_MIN} arrivals per weekday.
+            {names[0]}: how concentrated commuters are in each place, against the
+            98th percentile of the same measure.{" "}
+            {COMMUTE_CELLS[cell].src === "all"
+              ? `LODES ${COMMUTE_CELLS[cell].col === "work" ? "primary jobs by workplace" : "employed residents by home"} tract, ${year} — the snapshot year, clamped to what LEHD has published.`
+              : roundTrip
+                ? `Morning riders whose trip comes back in the evening, so shoppers, students and BART transfers are largely out. Grey: under ${COMMUTE_MIN} riders per weekday.`
+                : `Raw morning ${COMMUTE_CELLS[cell].col === "work" ? "arrivals" : "departures"} — this bundle predates the round-trip scores. Grey: under ${COMMUTE_MIN} riders per weekday.`}{" "}
+            Size still encodes total volume.
           </p>
         </>
       );
@@ -436,8 +440,14 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
     return (
       <>
         {bar(DIVERGING)}
-        {labels("homes (leave AM)", "workplaces (arrive AM)")}
-        <p className="hint">Morning balance of boardings vs alightings, {period.label} average weekday. Grey: too little service to judge. Click any place to recolour the map by inferred riders {commuteFocusMode === "from" ? "from" : "to"} it.</p>
+        {labels("¼×", "4×")}
+        <p className="hint">
+          {names[0]} ÷ {names[1]}, each as a share of its own total
+          {commuteCells.some(cellIsTractOnly) ? ` (LODES ${year})` : ""}. 1× = the two
+          agree. Red: more AC Transit than all commuters would imply; blue: more
+          non-AC — often BART-served or car territory. Log₂ scale. Grey: under{" "}
+          {COMMUTE_MIN} riders per weekday, or nothing published to divide by.
+        </p>
       </>
     );
   }
@@ -623,20 +633,12 @@ function areaStyle(state, level, index) {
         else if (state.commuteFocusMembers?.has(index)) {
           edge = { color: "#419c62", weight: 1.5 };
         }
-      } else if (
-        (state.commuteMode === "lodes" || state.commuteMode === "compare")
-        && level === "tract"
-        && state.data.lodes
-      ) {
-        color = state.commuteMode === "lodes"
-          ? lodesColor(state.data, index, state.commutePeriodIdx)
-          : compareColor(state.data, index, state.commutePeriodIdx);
       } else {
         color = commuteValue(
-          state.commute,
+          state.data,
           level,
           index,
-          state.commuteMode,
+          state.commuteCells,
           state.commutePeriodIdx,
         ).color;
       }
@@ -694,7 +696,7 @@ function renderDataLayer(api, data, options) {
           weight: 1,
         })
           .bindTooltip(() => (api.renderState.view === "commute" && api.renderState.commute
-            ? commuteTipHtml(data, "group", index, groups.name[index], api.renderState.commutePeriodIdx, api.renderState.commuteMode)
+            ? commuteTipHtml(data, "group", index, groups.name[index], api.renderState.commutePeriodIdx, api.renderState.commuteCells)
             : groupTipHtml(data, index, api.renderState.week)), { sticky: true })
           .on("click", () => api.renderState.callbacks.onMapClick("group", index, groups.name[index]));
         api.groupMarkers.push(marker);
@@ -733,7 +735,7 @@ function renderDataLayer(api, data, options) {
             color = flow ? ramp(SEQ_GREEN, Math.sqrt(flow / focusMax)) : null;
           }
         } else {
-          const result = commuteValue(commute, "group", index, options.commuteMode, options.commutePeriodIdx);
+          const result = commuteValue(data, "group", index, options.commuteCells, options.commutePeriodIdx);
           value = result.value;
           color = result.color;
         }
@@ -780,7 +782,7 @@ function renderDataLayer(api, data, options) {
               featureIndex,
               feature.properties?.name || feature.properties?.geoid,
               api.renderState.commutePeriodIdx,
-              api.renderState.commuteMode,
+              api.renderState.commuteCells,
             )
             : areaTipHtml(data, level, featureIndex, feature.properties || {}, api.renderState.week)), { sticky: true })
           .on("click", () => api.renderState.callbacks.onMapClick(
@@ -1203,112 +1205,217 @@ function corridorHoverHtml(data, era, index, load, imp, view, recThresh) {
 
 /* ------------------------------------------------------------- commute view */
 
-const COMMUTE_MIN = 20;   // riders/weekday below which a place is left grey
-const COMPARE_MIN = 5;    // AM arrivals/weekday below which a tract is grey
 
 function peakLabel(hour) {
   if (hour === 12) return "12p";
   return hour < 12 ? `${hour}a` : `${hour - 12}p`;
 }
 
-function commuteValue(commute, level, key, mode, p) {
-  const stats = commuteStats(commute, level, key, p);
-  if (!stats || stats.total < COMMUTE_MIN) {
-    return { color: null, value: stats ? stats.total : 0 };
-  }
-  if (mode === "peaks") {
-    const t = Math.max(0, Math.min(1, (stats.peakRatio - 1) / 3));
-    return { color: ramp(SEQ_BLUE, Math.sqrt(t)), value: stats.total };
-  }
-  // Positive AM net = riders arrive in the morning = workplace (red side of
-  // the diverging ramp); negative = riders leave = residential (blue side).
-  const t = Math.max(0.06, Math.min(0.94, 0.5 + stats.amNet * 2.2));
-  return { color: ramp(DIVERGING, t), value: stats.total };
+/* ---- the commute grid: two sources x two ends of the commute ----
+
+   Picking one cell maps that measure's concentration; picking both cells of a
+   column compares them. Mixing columns is not offered, because bus arrivals
+   over resident workers is not a ratio of anything.
+
+   The AC Transit row is net round-trip commuters, not raw morning arrivals: a
+   morning arrival on its own cannot tell a commuter from a shopper, a student
+   or someone changing to BART. Against LODES workplace-ness the round-trip
+   measure scores rho 0.45 where raw arrivals score 0.22, and it holds that
+   across 2019/2023/2026 while raw arrivals decay. See round_trip() in
+   scripts/build_commute_pack.py. */
+
+const COMMUTE_CELLS = {
+  "ac-work": { label: "AC Transit workplaces", col: "work", src: "ac" },
+  "ac-home": { label: "AC Transit homes", col: "home", src: "ac" },
+  "all-work": { label: "All workplaces", col: "work", src: "all" },
+  "all-home": { label: "All homes", col: "home", src: "all" },
+};
+const COMMUTE_GRID = [["ac-work", "ac-home"], ["all-work", "all-home"]];
+const COMMUTE_DEFAULT_CELLS = ["ac-work"];
+
+// LODES is published per tract and per year, so those two cells exist only at
+// tract level; the AC cells work at every area level.
+function cellIsTractOnly(cell) {
+  return COMMUTE_CELLS[cell].src === "all";
 }
 
-/* ---- LODES modes: all commuters, and the AC-vs-LODES workplace multiplier */
+export function commuteLocksTractFor(cells) {
+  return cells.some(cellIsTractOnly);
+}
 
-function lodesDomain(lodes, year) {
-  lodes._domains = lodes._domains || {};
-  if (!lodes._domains[year]) {
-    const values = (lodes.jobs[year] || []).filter((v) => v > 0);
-    values.sort((a, b) => a - b);
-    lodes._domains[year] = values.length
-      ? values[Math.floor(values.length * 0.98)]
-      : 1;
+/* Toggling a cell. Two cells of one column compare; a click in the other
+   column starts over rather than building a cross-column pair that has no
+   meaning, and the last selected cell cannot be switched off -- the map would
+   have nothing to draw. */
+export function toggleCommuteCell(cells, cell) {
+  if (cells.includes(cell)) {
+    return cells.length > 1 ? cells.filter((c) => c !== cell) : cells;
   }
-  return lodes._domains[year];
+  const col = COMMUTE_CELLS[cell].col;
+  const sameCol = cells.filter((c) => COMMUTE_CELLS[c].col === col);
+  return sameCol.length === 1 ? orderCells([...sameCol, cell]) : [cell];
+}
+
+/* A pair always reads AC Transit first, whichever cell was clicked first, so
+   the diverging ramp means one fixed thing: red is more AC Transit than all
+   commuters would imply, blue is more non-AC. Click order must never be able
+   to flip the map's colours. */
+function orderCells(cells) {
+  return [...cells].sort(
+    (a, b) => (COMMUTE_CELLS[a].src === "ac" ? 0 : 1) - (COMMUTE_CELLS[b].src === "ac" ? 0 : 1),
+  );
+}
+
+function cellValue(data, level, key, p, cell) {
+  const spec = COMMUTE_CELLS[cell];
+  if (spec.src === "all") {
+    if (level !== "tract" || !data.lodes) return null;
+    const field = spec.col === "work" ? "jobs" : "workers";
+    return lodesAt(data.lodes, field, lodesYear(data, p), key);
+  }
+  const rt = commuteRt(data.commute, level, key, p);
+  if (rt) return spec.col === "work" ? rt.work : rt.home;
+  // Pack built before the round-trip bins existed: fall back to the raw
+  // morning marginals so an older bundle still renders the grid.
+  const stats = commuteStats(data.commute, level, key, p);
+  if (!stats) return null;
+  return spec.col === "work" ? stats.amIn : stats.amOut;
+}
+
+function cellTotal(data, level, p, cell) {
+  const spec = COMMUTE_CELLS[cell];
+  if (spec.src === "all") {
+    return lodesTotal(data.lodes, spec.col === "work" ? "jobs" : "workers",
+      lodesYear(data, p));
+  }
+  const totals = commuteRtTotals(data.commute, level, p);
+  if (totals) return spec.col === "work" ? totals.work : totals.home;
+  return lodesArrivals(data.commute, level, p, spec.col).sum;
+}
+
+function cellDomain(data, level, p, cell) {
+  const spec = COMMUTE_CELLS[cell];
+  if (spec.src === "all") {
+    return lodesDomain(data.lodes, lodesYear(data, p),
+      spec.col === "work" ? "jobs" : "workers");
+  }
+  if (data.commute.rt) {
+    return commuteRtDomain(data.commute, level, p, spec.col);
+  }
+  return commuteDomain(data.commute, level, p, spec.col === "work" ? "amIn" : "amOut");
+}
+
+// Concentration: this place's share of everyone the cell counts.
+function cellShare(data, level, key, p, cell) {
+  const value = cellValue(data, level, key, p, cell);
+  const total = cellTotal(data, level, p, cell);
+  return value === null || !(total > 0) ? NaN : value / total;
+}
+
+/* Is there enough here to say anything? The AC cells need the shared service
+   floor; the LODES cells do not, because an unserved tract still has jobs. */
+function cellDrawable(data, level, key, p, cell) {
+  if (COMMUTE_CELLS[cell].src === "all") {
+    const value = cellValue(data, level, key, p, cell);
+    return value !== null && value >= COMMUTE_MIN;
+  }
+  const stats = commuteStats(data.commute, level, key, p);
+  return !!stats && stats.total >= COMMUTE_MIN;
+}
+
+/* One cell: concentration on the magenta ramp, against the 98th percentile of
+   the same measure. Two: the ratio of the two concentrations on the diverging
+   ramp, log2 around parity, so 1x is the midpoint and either end is 4x. */
+function commuteCellColor(data, level, key, p, cells) {
+  if (!cells.every((cell) => cellDrawable(data, level, key, p, cell))) return null;
+  if (cells.length === 1) {
+    const value = cellValue(data, level, key, p, cells[0]);
+    if (value === null) return null;
+    return ramp(SEQ_MAGENTA, seqT(value, cellDomain(data, level, p, cells[0])));
+  }
+  const ratio = commuteCellRatio(data, level, key, p, cells);
+  return Number.isNaN(ratio) ? null : ramp(DIVERGING, divT(ratio));
+}
+
+/* AC Transit's concentration over all commuters', never the other way round
+   -- see orderCells. NaN -- grey -- when either side has nothing to take a
+   ratio of. */
+function commuteCellRatio(data, level, key, p, cells) {
+  if (cells.length !== 2) return NaN;
+  const [ac, all] = orderCells(cells);
+  const a = cellShare(data, level, key, p, ac);
+  const b = cellShare(data, level, key, p, all);
+  return !(b > 0) || Number.isNaN(a) ? NaN : a / b;
+}
+
+function commuteValue(data, level, key, cells, p) {
+  const stats = commuteStats(data.commute, level, key, p);
+  return {
+    color: commuteCellColor(data, level, key, p, cells),
+    value: stats ? stats.total : 0,
+  };
+}
+
+/* Memo tables for the LODES ramps, held beside the pack rather than on it so
+   the parsed object stays a faithful copy of lodes.json. */
+const lodesMemos = new WeakMap();
+
+function lodesMemo(lodes) {
+  let memo = lodesMemos.get(lodes);
+  if (!memo) {
+    memo = { domains: {}, totals: {} };
+    lodesMemos.set(lodes, memo);
+  }
+  return memo;
+}
+
+// p98 of the year's counts, the same rule commuteDomain uses.
+function lodesDomain(lodes, year, field = "jobs") {
+  const { domains } = lodesMemo(lodes);
+  const cacheKey = `${field}|${year}`;
+  if (!domains[cacheKey]) {
+    const values = (lodes[field]?.[year] || []).filter((v) => v >= COMMUTE_MIN);
+    values.sort((a, b) => a - b);
+    domains[cacheKey] = values.length ? values[Math.floor(values.length * 0.98)] : 1;
+  }
+  return domains[cacheKey];
 }
 
 function lodesTotal(lodes, field, year) {
-  lodes._totals = lodes._totals || {};
+  const { totals } = lodesMemo(lodes);
   const cacheKey = `${field}|${year}`;
-  if (!(cacheKey in lodes._totals)) {
-    lodes._totals[cacheKey] = (lodes[field]?.[year] || []).reduce((s, v) => s + v, 0);
+  if (!(cacheKey in totals)) {
+    totals[cacheKey] = (lodes[field]?.[year] || []).reduce((s, v) => s + v, 0);
   }
-  return lodes._totals[cacheKey];
+  return totals[cacheKey];
 }
 
 function lodesYear(data, p) {
   return lodesYearFor(data.lodes, data.commute.meta.periods[p].id);
 }
 
-// Where the jobs are, all commuters included. Independent of the time bar
-// beyond the LODES year: ACS-style, one value per year.
-function lodesColor(data, key, p) {
-  const year = lodesYear(data, p);
-  const jobs = lodesAt(data.lodes, "jobs", year, key);
-  if (!jobs) return null;
-  return ramp(SEQ_BLUE, Math.sqrt(jobs / lodesDomain(data.lodes, year)));
-}
-
-// Workplace multiplier: the tract's share of morning AC arrivals divided by
-// its share of LODES primary jobs. 1x = bus commuters arrive in proportion
-// to jobs; the log2 scale centers the ramp on parity, 4x at either end.
-function compareColor(data, key, p) {
-  const year = lodesYear(data, p);
-  const jobs = lodesAt(data.lodes, "jobs", year, key);
-  if (!jobs) return null;
-  const { arrivals, sum } = lodesArrivals(data.commute, "tract", p);
-  if (!(arrivals[key] >= COMPARE_MIN) || sum <= 0) return null;
-  const lq = (arrivals[key] / sum) / (jobs / lodesTotal(data.lodes, "jobs", year));
-  const t = Math.max(0.06, Math.min(0.94, 0.5 + Math.log2(lq) / 4));
-  return ramp(DIVERGING, t);
-}
-
-function commuteTipHtml(data, level, keyIndex, name, p, mode) {
+function commuteTipHtml(data, level, keyIndex, name, p, cells) {
+  const rows = cells.map((cell) => {
+    const value = cellValue(data, level, keyIndex, p, cell);
+    const share = cellShare(data, level, keyIndex, p, cell);
+    const label = COMMUTE_CELLS[cell].src === "all"
+      ? `${COMMUTE_CELLS[cell].label} (${lodesYear(data, p)})`
+      : COMMUTE_CELLS[cell].label;
+    return `<div class="row"><span class="k">${escapeHtml(label)}</span><span>${
+      value === null ? "-" : fmt(value)
+    }${Number.isFinite(share) ? ` · ${(100 * share).toFixed(2)}%` : ""}</span></div>`;
+  }).join("");
+  const ratio = commuteCellRatio(data, level, keyIndex, p, cells);
   const stats = commuteStats(data.commute, level, keyIndex, p);
-  const lodes = data.lodes;
-  if (lodes && level === "tract" && (mode === "lodes" || mode === "compare")) {
-    const year = lodesYear(data, p);
-    const jobs = lodesAt(lodes, "jobs", year, keyIndex);
-    const workers = lodesAt(lodes, "workers", year, keyIndex);
-    const arrivals = lodesArrivals(data.commute, level, p).arrivals[keyIndex];
-    const lq = mode === "compare" && jobs > 0
-      ? compareLq(data, keyIndex, p, jobs)
-      : NaN;
-    return `<div style="font-size:12px"><b>${escapeHtml(name)}</b>
-      <div class="row"><span class="k">Primary jobs (LODES ${year})</span><span>${fmt(jobs)}</span></div>
-      <div class="row"><span class="k">Employed residents</span><span>${fmt(workers)}</span></div>
-      <div class="row"><span class="k">AC arrivals / weekday</span><span>${fmt(arrivals)}</span></div>
-      ${Number.isFinite(lq) ? `<div class="row"><span class="k">Workplace multiplier</span><span>${lq.toFixed(2)}×</span></div>` : ""}
-    </div>`;
-  }
-  if (!stats) return "";
-  const growth = stats.baseTotal > 0 ? `${(100 * stats.total / stats.baseTotal).toFixed(0)}%` : "-";
   return `<div style="font-size:12px"><b>${escapeHtml(name)}</b>
-    <div class="row"><span class="k">Riders / weekday</span><span>${fmt(stats.total)}</span></div>
-    <div class="row"><span class="k">vs Feb 2020</span><span>${growth}</span></div>
-    <div class="row"><span class="k">AM balance</span><span>${stats.amNet >= 0 ? "+" : ""}${(100 * stats.amNet).toFixed(0)}%</span></div>
-    <div class="row"><span class="k">Peak strength</span><span>${Number.isFinite(stats.peakRatio) ? `${stats.peakRatio.toFixed(1)}×` : "-"}</span></div>
+    ${rows}
+    ${Number.isFinite(ratio)
+      ? `<div class="row"><span class="k">Concentration ratio</span><span>${ratio.toFixed(2)}×</span></div>`
+      : ""}
+    ${stats
+      ? `<div class="row"><span class="k">All riders / weekday</span><span>${fmt(stats.total)}</span></div>`
+      : ""}
   </div>`;
-}
-
-function compareLq(data, key, p, jobs) {
-  const { arrivals, sum } = lodesArrivals(data.commute, "tract", p);
-  if (sum <= 0 || arrivals[key] < COMPARE_MIN) return NaN;
-  const year = lodesYear(data, p);
-  return (arrivals[key] / sum) / (jobs / lodesTotal(data.lodes, "jobs", year));
 }
 
 function CommutePanel({ data, commute, level, keyIndex, p }) {
@@ -1398,7 +1505,7 @@ export default function RidershipExplorer() {
   const [selection, setSelection] = useState(null);
   const [routeMode, setRouteMode] = useState("own");
   const [contextMenu, setContextMenu] = useState(null);
-  const [commuteMode, setCommuteMode] = useState("character");
+  const [commuteCells, setCommuteCells] = useState(COMMUTE_DEFAULT_CELLS);
   const [commuteFocus, setCommuteFocus] = useState(null);
   const [commuteFocusMode, setCommuteFocusMode] = useState("to");
   const [regionChooser, setRegionChooser] = useState(null);
@@ -1457,7 +1564,7 @@ export default function RidershipExplorer() {
   // LODES is published per tract, so the All-commuters and Compare modes only
   // exist at tract level; entering them moves the map and greys the selector.
   const commuteLocksTract = view === "commute"
-    && (commuteMode === "lodes" || commuteMode === "compare");
+    && commuteLocksTractFor(commuteCells);
   useEffect(() => {
     if (!commuteLocksTract) return;
     setLevel((current) => (current === "tract" ? current : "tract"));
@@ -1533,7 +1640,7 @@ export default function RidershipExplorer() {
       if (!picked.length) return;
       // In the commute view a box can become a region origin ("from") or
       // destination ("to") for the inferred-riders recolouring.
-      if (view === "commute" && commute && level !== "none") {
+      if (view === "commute" && commute && level !== "none" && !commuteLocksTract) {
         const api = mapApiRef.current;
         const point = api?.map ? api.map.latLngToContainerPoint([northWest.lat, northWest.lng]) : null;
         const wrap = mapWrapRef.current?.getBoundingClientRect();
@@ -1713,7 +1820,7 @@ export default function RidershipExplorer() {
       detail,
       recThresh,
       commute: data.commute,
-      commuteMode,
+      commuteCells,
       commutePeriodIdx,
       commuteFocus,
       commuteFocusMode,
@@ -1723,7 +1830,7 @@ export default function RidershipExplorer() {
         onMapClick: (...args) => callbacksRef.current.onMapClick(...args),
       },
     });
-  }, [data, mapReady, week, view, level, showRoutes, detail, recThresh, commuteMode, commutePeriodIdx, commuteFocus, commuteFocusMode]);
+  }, [data, mapReady, week, view, level, showRoutes, detail, recThresh, commuteCells, commutePeriodIdx, commuteFocus, commuteFocusMode]);
 
   useEffect(() => {
     if (!playing || !data) return undefined;
@@ -1822,24 +1929,39 @@ export default function RidershipExplorer() {
                     </p>
                   </>
                 ) : (
-                  <div className="seg">
-                    {[
-                      ["character", "AC Transit commuters"],
-                      ["lodes", "All commuters"],
-                      ["compare", "Compare"],
-                      ["peaks", "Peak strength"],
-                    ].map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={`segbtn${commuteMode === value ? " on" : ""}`}
-                        onClick={() => setCommuteMode(value)}
-                      >
-                        {label}
-                      </button>
+                  <div className="cellgrid">
+                    {COMMUTE_GRID.map((row, rowIndex) => (
+                      <div className="cellrow" key={rowIndex}>
+                        {row.map((cell) => {
+                          const disabled = cellIsTractOnly(cell) && !data.lodes;
+                          const on = commuteCells.includes(cell);
+                          return (
+                            <button
+                              key={cell}
+                              type="button"
+                              className={`cellbtn${on ? " on" : ""}`}
+                              disabled={disabled}
+                              aria-pressed={on}
+                              onClick={() => setCommuteCells(
+                                (current) => toggleCommuteCell(current, cell),
+                              )}
+                            >
+                              {COMMUTE_CELLS[cell].label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     ))}
                   </div>
                 )}
+                {!commuteFocus ? (
+                  <p className="hint">
+                    {commuteCells.length === 1
+                      ? "Showing one measure's concentration. Pick the cell above or below it to compare the two."
+                      : `Comparing ${COMMUTE_CELLS[commuteCells[0]].label} against ${COMMUTE_CELLS[commuteCells[1]].label}.`}
+                    {data.lodes ? "" : " All workplaces and All homes need lodes.json, which this bundle does not carry — run scripts/build_lodes_pack.py and sync the pack."}
+                  </p>
+                ) : null}
                 <p className="hint">
                   Showing the {data.commute.meta.periods[commutePeriodIdx].label} average weekday
                   ({data.commute.meta.periods[commutePeriodIdx].weekdays} weekdays, APC-corrected) —
@@ -1882,7 +2004,7 @@ export default function RidershipExplorer() {
               </label>
             ))}
             {commuteLocksTract ? (
-              <p className="hint">All commuters and Compare are tract-level: LODES is published per tract.</p>
+              <p className="hint">All workplaces and All homes are tract-level: LODES is published per tract.</p>
             ) : null}
           </section>
 
@@ -1903,7 +2025,7 @@ export default function RidershipExplorer() {
               level={level}
               recThresh={recThresh}
               commute={data?.commute}
-              commuteMode={commuteMode}
+              commuteCells={commuteCells}
               period={data?.commute ? data.commute.meta.periods[commutePeriodIdx] : null}
               commuteFocus={commuteFocus}
               commuteFocusMode={commuteFocusMode}
@@ -1975,7 +2097,7 @@ export default function RidershipExplorer() {
             onClose={closeDetail}
             commute={data.commute}
             periodIdx={commutePeriodIdx}
-            commuteMode={commuteMode}
+            commuteCells={commuteCells}
           />
           ) : null}
           {selection && data ? (

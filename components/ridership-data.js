@@ -81,6 +81,29 @@ export function ramp(stops, value) {
   return stops[Math.round(x)];
 }
 
+/* How the commute view positions a value on a ramp. Two rules, one per ramp
+   family, so a colour means the same kind of thing in every mode.
+
+   seqT: a magnitude, square-rooted against the 98th percentile of its own
+   distribution -- full strength always reads as "top of this distribution"
+   rather than as some per-mode constant.
+
+   divT: a ratio, log2 around parity, so the midpoint is 1x and either end is
+   4x. The 0.06/0.94 clamp holds the extremes just inside the ramp, so a
+   saturated colour reads as "at least 4x" instead of "exactly 4x". A ratio of
+   0 pins to the low end and an infinite one to the high end; only an
+   undefined ratio (0/0) returns NaN, which ramp() renders grey. */
+export function seqT(value, domain) {
+  return domain > 0 ? Math.sqrt(Math.max(0, value) / domain) : NaN;
+}
+
+export function divT(ratio) {
+  if (Number.isNaN(ratio)) return NaN;
+  if (ratio <= 0) return 0.06;
+  if (!Number.isFinite(ratio)) return 0.94;
+  return Math.max(0.06, Math.min(0.94, 0.5 + Math.log2(ratio) / 4));
+}
+
 export function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -217,7 +240,7 @@ export async function loadVisualizationData() {
   }
   // LODES all-commuter marginals per tract (scripts/build_lodes_pack.py).
   // Optional: an older bundle without the file still works, the commute view
-  // just hides the LODES and compare modes.
+  // just drops the All-commuters and Compare buttons.
   try {
     data.lodes = await getJson("lodes.json");
   } catch {
@@ -575,8 +598,75 @@ async function loadCommuteData() {
       };
     }),
   );
+  // Round-trip commute scores. Optional: a pack built before these existed
+  // still loads, and the commute grid falls back to raw AM arrivals.
+  const rt = {};
+  await Promise.all(
+    Object.entries(meta.rt || {}).map(async ([level, spec]) => {
+      const q = await getBinary(spec.file, Uint16Array);
+      rt[level] = { q, scales: Float32Array.from(spec.scales), n: spec.n, nP: spec.nP };
+    }),
+  );
   const baseIdx = meta.periods.findIndex((period) => period.id === meta.base);
-  return { meta, hourly, odCache: {}, commuteDomains: {}, baseIdx };
+  return {
+    meta,
+    hourly,
+    rt: Object.keys(rt).length ? rt : null,
+    odCache: {},
+    commuteDomains: {},
+    baseIdx,
+  };
+}
+
+/* Net round-trip commuters for one key: morning arrivals that come back in
+   the evening, netted against the same pair's opposite direction so an
+   all-day two-way corridor scores near zero. See round_trip() in
+   scripts/build_commute_pack.py. Already avg-weekday riders, so unlike the
+   hourly bins these are not divided by the snapshot's weekday count. */
+export function commuteRt(commute, level, key, p) {
+  const store = commute.rt?.[level];
+  if (!store || key >= store.n) return null;
+  const scale = store.scales[key];
+  const base = (key * store.nP + p) * 2;
+  return { work: store.q[base] * scale, home: store.q[base + 1] * scale };
+}
+
+// System totals per level/snapshot -- the denominators behind every "% of
+// commuters" the grid shows. Cached like the colour domains.
+export function commuteRtTotals(commute, level, p) {
+  const store = commute.rt?.[level];
+  if (!store) return null;
+  const cache = commute.rtTotals || (commute.rtTotals = {});
+  const cacheKey = `${level}|${p}`;
+  if (cache[cacheKey]) return cache[cacheKey];
+  let work = 0;
+  let home = 0;
+  for (let key = 0; key < store.n; key += 1) {
+    const v = commuteRt(commute, level, key, p);
+    work += v.work;
+    home += v.home;
+  }
+  cache[cacheKey] = { work, home };
+  return cache[cacheKey];
+}
+
+/* The 98th percentile of a round-trip end, for the concentration ramp. Same
+   rule as commuteDomain: only keys the mode actually colours count, so a
+   long tail of near-zero places cannot flatten the ramp. */
+export function commuteRtDomain(commute, level, p, end) {
+  const store = commute.rt?.[level];
+  if (!store) return 1;
+  const cache = commute.commuteDomains;
+  const cacheKey = `rt.${end}|${level}|${p}`;
+  if (cache[cacheKey]) return cache[cacheKey];
+  const values = [];
+  for (let key = 0; key < store.n; key += 1) {
+    const v = commuteRt(commute, level, key, p)[end];
+    if (v > 0) values.push(v);
+  }
+  values.sort((a, b) => a - b);
+  cache[cacheKey] = values.length ? values[Math.floor(values.length * 0.98)] : 1;
+  return cache[cacheKey];
 }
 
 // [key][snapshot][measure][hour]; snapshot index into meta.periods.
@@ -718,14 +808,39 @@ export function commuteStats(commute, level, key, p) {
   };
 }
 
-export function commuteDomain(commute, level, p) {
-  const cacheKey = `${level}|${p}`;
+/* The one grey floor the whole commute view shares: under this much service
+   no ramp can say anything honest about a place. */
+export const COMMUTE_MIN = 20;
+
+// "peakExcess" is peak-hour riding above a flat day, so a flat place sits at
+// 0; every other field is read straight off the stats object.
+function commuteStatValue(stats, field) {
+  return field === "peakExcess" ? stats.peakRatio - 1 : stats[field];
+}
+
+/* A colour domain should describe the places the mode actually colours, so
+   the floor that greys a place also keeps it out of the percentile --
+   otherwise a handful of barely-served places with wild ratios stretch the
+   ramp and wash out everything that is drawn. "total" is the exception: it
+   also sizes the stop dots, which are drawn wherever there is any ridership
+   at all, so widening its domain would shrink every dot on the map. */
+function commuteStatIncluded(stats, field) {
+  return field === "total" || stats.total >= COMMUTE_MIN;
+}
+
+/* The 98th percentile of a per-place statistic for one snapshot, cached per
+   field/level/period. Both magnitude ramps normalise against this, which is
+   what makes them comparable; it also sizes the stop dots. */
+export function commuteDomain(commute, level, p, field = "total") {
+  const cacheKey = `${field}|${level}|${p}`;
   if (commute.commuteDomains[cacheKey]) return commute.commuteDomains[cacheKey];
   const store = commute.hourly[level];
   const values = [];
   for (let key = 0; key < store.n; key += 1) {
     const stats = commuteStats(commute, level, key, p);
-    if (stats && stats.total > 0) values.push(stats.total);
+    if (!stats || !commuteStatIncluded(stats, field)) continue;
+    const value = commuteStatValue(stats, field);
+    if (value > 0) values.push(value);
   }
   values.sort((a, b) => a - b);
   const domain = values.length ? values[Math.floor(values.length * 0.98)] : 1;
@@ -751,18 +866,21 @@ export function lodesAt(lodes, field, year, key) {
   return row && key < row.length ? row[key] : 0;
 }
 
-// System-wide AM arrivals per tract for one snapshot, cached per period: the
-// denominators of the compare-mode multiplier.
-export function lodesArrivals(commute, level, p) {
+/* Raw morning marginals per key for one snapshot, cached per level/period.
+   Only the fallback path uses these now -- a pack built before the
+   round-trip bins existed -- but they are still the honest denominators for
+   "share of morning arrivals". `end` is "work" (arrivals) or "home"
+   (departures). */
+export function lodesArrivals(commute, level, p, end = "work") {
   const cache = commute.arrivalCache || (commute.arrivalCache = {});
-  const cacheKey = `${level}|${p}`;
+  const cacheKey = `${end}|${level}|${p}`;
   if (cache[cacheKey]) return cache[cacheKey];
   const store = commute.hourly[level];
   const arrivals = new Float64Array(store.n);
   let sum = 0;
   for (let key = 0; key < store.n; key += 1) {
     const stats = commuteStats(commute, level, key, p);
-    arrivals[key] = stats ? stats.amIn : 0;
+    arrivals[key] = stats ? (end === "work" ? stats.amIn : stats.amOut) : 0;
     sum += arrivals[key];
   }
   cache[cacheKey] = { arrivals, sum };
