@@ -21,6 +21,9 @@ binary bundle the browser can page through without a server round trip.
   never did.
 - **Corridors and sections** — ridership matched onto the road network, so
   routes that share a street share an edge and their loads add up there.
+  Each corridor is cut at nodes (stop groups and places routes join or leave)
+  and drawn as smooth Bezier curves that meet end to end, so a street reads as
+  one continuous line whose width and colour change only at a node.
   Three GTFS eras (Nov 2019, Dec 2024, Aug 2025) are carried separately
   because stop sequences changed between them.
 - **Commute patterns** — average-weekday hourly boarding and alighting
@@ -50,6 +53,16 @@ binary bundle the browser can page through without a server round trip.
   All-workplaces cell — while the AC round-trip cell ranks it a top-five
   destination, which is a good illustration of what each side can and cannot
   see.
+- **Cities** — a fourth area level: Census places (incorporated cities and
+  CDPs such as Castro Valley and Ashland), each the sum of the stop groups
+  inside it.
+- **Speed per corridor** and **Level of service** — corridors coloured by
+  observed average speed (mph between stop groups, from door-open times, dwell
+  included) or observed headway, for weekday peak, weekday daytime, weekday
+  night and weekend, for every month. The period hours come from each GTFS
+  signup's scheduled buses-in-service profile: where it steps up and down. Each route's detail panel
+  carries the same four periods. Corridors are drawn with the stop-group and
+  routes-only maps; over areas only an opened route's line is shown.
 - **Median household income** by tract and block group (ACS 5-year, 2024,
   table B19013) as an overlay.
 
@@ -95,6 +108,13 @@ stop-group coordinates and names, route lists per era, quantization scales —
 and the `.bin` / `.u16` / `.u8` files are flat typed arrays it describes.
 Objects are stored gzipped (58 MB → 33 MB on the wire) with a one-day cache
 lifetime.
+
+The client does not load the whole bundle. Startup fetches `meta.json`, the
+stop-group and route weeks, the current era's corridors and a few small side
+tables (about 18 MB); tract, block-group and city layers, other eras'
+corridors, each month of service and the commute binaries are fetched the
+first time a view needs them. `pack_index.json` carries the one number that
+needs the whole bundle to compute: the corridor colour domain.
 
 `lodes.json` is the one optional file the commute view's *All commuters* and
 *Compare* modes read: LODES8 OD main tables (JT01 primary jobs) aggregated to
@@ -142,7 +162,10 @@ that could identify a rider or a driver.
 needs two intermediates (the capture-rate table and the NTD calibration) that
 live in sibling repositories not published here; point `ACPRA_ROOT` at a
 checkout that has them, or set `ACPRA_REPLICATE` and `ACPRA_VIS` individually.
-`ACPRA_BUCKET` overrides the raw-data source. `scripts/build_lodes_pack.py`
+`ACPRA_BUCKET` overrides the raw-data source. `scripts/build_city_pack.py`
+builds `cities.json` + `cities.geojson` (Census places), and
+`scripts/build_service_pack.py` builds `service_meta.json` + `service_corridors.<hash>.bin`
+(speeds and headways from the cached raw APC months). `scripts/build_lodes_pack.py`
 builds `lodes.json` (no sibling dependencies, only census.gov access). For
 deployment both need uploading to the pack bucket and a line in its
 `manifest.json`.

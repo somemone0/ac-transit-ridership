@@ -290,7 +290,9 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
       }
       for (const [region, regionAlpha] of regions) {
         inRegion(region, () => {
-          context.lineCap = "round";
+          // Flat ends: the curved pieces butt together at shared nodes, and
+          // round ends would overlap there into darker beads.
+          context.lineCap = "butt";
           context.lineJoin = "round";
           for (const line of lines) {
             context.beginPath();

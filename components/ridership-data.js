@@ -138,60 +138,52 @@ function buildRouteSectionIndex(meta) {
   return index;
 }
 
-function buildDomains(data) {
-  const domains = {};
-  for (const level of ["group", "tract", "bgroup"]) {
-    const store = data.store[level];
-    const values = [];
-    for (let key = 0; key < store.n; key += 1) {
-      for (let week = 0; week < data.W; week += 4) {
-        const value = totalAt(data, level, key, week);
-        if (value > 0) values.push(value);
-      }
+// The 98th percentile of a level's weekly totals, sampled every fourth week.
+function levelDomain(data, level) {
+  const store = data.store[level];
+  const values = [];
+  for (let key = 0; key < store.n; key += 1) {
+    for (let week = 0; week < data.W; week += 4) {
+      const value = totalAt(data, level, key, week);
+      if (value > 0) values.push(value);
     }
-    values.sort((a, b) => a - b);
-    domains[level] = values.length ? values[Math.floor(values.length * 0.98)] : 1;
   }
-  return domains;
+  values.sort((a, b) => a - b);
+  return values.length ? values[Math.floor(values.length * 0.98)] : 1;
 }
 
+async function optionalJson(name) {
+  try {
+    return await getJson(name);
+  } catch {
+    return null;
+  }
+}
+
+/* Startup loads only what the default map needs: the index, the stop-group
+   and route weeks, and the small side tables. Everything else -- the tract,
+   block-group and city layers, each era's corridors, a month of service,
+   the commute binaries -- is fetched the first time a view asks for it,
+   through ensureData(). Data is added to this same object, so every reader
+   below stays synchronous and simply finds nothing until its data is in. */
 export async function loadVisualizationData() {
-  const meta = await getJson("meta.json");
-  const [routeWeeks, stopGroupWeeks, tractWeeks, blockGroupWeeks] = await Promise.all([
-    getBinary("route_weeks.u16", Uint16Array),
-    getBinary("stopgroup_weeks.u16", Uint16Array),
-    getBinary("tract_weeks.u16", Uint16Array),
-    getBinary("bgroup_weeks.u16", Uint16Array),
-  ]);
-
-  const sections = {};
-  const corridors = {};
-  const corridorNodes = {};
-  await Promise.all(
-    Object.entries(meta.sections).map(async ([era, spec]) => {
-      const [load, imp, eraCorridors, eraNodes] = await Promise.all([
-        getBinary(`section_load_${era}.u16`, Uint16Array),
-        getBinary(`section_imp_${era}.u8`, Uint8Array),
-        getJson(`corridors_${era}.json`),
-        getJson(`nodes_${era}.json`),
-      ]);
-      sections[era] = {
-        load,
-        imp,
-        scale: Float32Array.from(spec.scale),
-        idIndex: new Map(spec.section_ids.map((id, index) => [id, index])),
-        weekLo: spec.week_lo,
-        nWeeks: spec.n_weeks,
-      };
-      corridors[era] = eraCorridors;
-      corridorNodes[era] = eraNodes;
-    }),
-  );
-
-  const [tractGeo, blockGroupGeo] = await Promise.all([
-    getJson("tracts.geojson"),
-    getJson("blockgroups.geojson"),
-  ]);
+  const [meta, routeWeeks, stopGroupWeeks, index, cities, serviceMeta, commuteMeta, lodes] =
+    await Promise.all([
+      getJson("meta.json"),
+      getBinary("route_weeks.u16", Uint16Array),
+      getBinary("stopgroup_weeks.u16", Uint16Array),
+      // Whole-bundle numbers precomputed by scripts/build_pack_index.py.
+      optionalJson("pack_index.json"),
+      // Optional side tables. Without cities.json there is no Cities level,
+      // without service_meta.json no Speed / Level of service views, without
+      // commute_meta.json no commute view, and without lodes.json (LODES
+      // all-commuter marginals, scripts/build_lodes_pack.py) no All-commuters
+      // or Compare cells.
+      optionalJson("cities.json"),
+      optionalJson("service_meta.json"),
+      optionalJson("commute_meta.json"),
+      optionalJson("lodes.json"),
+    ]);
 
   const data = {
     meta,
@@ -203,50 +195,198 @@ export async function loadVisualizationData() {
         scale: Float32Array.from(meta.scales.stopgroup),
         n: meta.stop_groups.n,
       },
-      tract: {
-        q: tractWeeks,
-        scale: Float32Array.from(meta.scales.tract),
-        n: meta.tracts.length,
-      },
-      bgroup: {
-        q: blockGroupWeeks,
-        scale: Float32Array.from(meta.scales.bgroup),
-        n: meta.bgroups.length,
-      },
     },
     routeW: {
       q: routeWeeks,
       scale: Float32Array.from(meta.route_weeks.scale),
       ix: new Map(meta.route_weeks.routes.map((route, index) => [route, index])),
     },
-    sections,
-    corridors,
-    corridorNodes,
-    geo: { tracts: tractGeo, blockgroups: blockGroupGeo },
+    sections: {},
+    corridors: {},
+    corridorNodes: {},
+    geo: {},
     routeSections: buildRouteSectionIndex(meta),
     routeNameIx: new Map(meta.route_names.map((route, index) => [route, index])),
-    domains: null,
+    domains: {},
     corridorStats: {},
-    corridorDom: null,
+    corridorDom: index?.corridor_domain ?? null,
     incomeDom: null,
     monthIndex: meta.weeks.map((week) => meta.months.indexOf(week.slice(0, 7))),
+    service: serviceMeta,
+    commute: commuteMeta ? commuteShell(commuteMeta) : null,
+    lodes,
+    cities: null,
+    pending: new Map(),
   };
-
-  data.domains = buildDomains(data);
-  try {
-    data.commute = await loadCommuteData();
-  } catch {
-    data.commute = null;
-  }
-  // LODES all-commuter marginals per tract (scripts/build_lodes_pack.py).
-  // Optional: an older bundle without the file still works, the commute view
-  // just drops the All-commuters and Compare buttons.
-  try {
-    data.lodes = await getJson("lodes.json");
-  } catch {
-    data.lodes = null;
-  }
+  data.domains.group = levelDomain(data, "group");
+  if (cities) attachCities(data, cities);
   return data;
+}
+
+// Everything the explorer can show, so the story page (which reads block
+// groups, every era's corridors and the commute profiles) can load it all.
+export function everything(data) {
+  return {
+    levels: ["tract", "bgroup", ...(data.cities ? ["city"] : [])],
+    eras: Object.keys(data.meta.sections),
+    commute: true,
+  };
+}
+
+/* Fetch whatever a view needs that is not loaded yet. `needs` is
+   { levels: [...], eras: [...], serviceMonth: snapshot, commute: bool }.
+   Each piece is fetched once: concurrent callers share the same promise, and
+   a failed fetch is forgotten so a later call can retry it. Resolves to true
+   when anything new arrived. */
+export async function ensureData(data, needs) {
+  const jobs = [];
+  const once = (key, load) => {
+    if (!data.pending.has(key)) {
+      data.pending.set(key, load().then(() => true, (error) => {
+        data.pending.delete(key);
+        throw error;
+      }));
+      jobs.push(data.pending.get(key));
+    } else if (!data.pending.get(key).settled) {
+      jobs.push(data.pending.get(key));
+    }
+  };
+  for (const level of needs.levels || []) {
+    if (level === "tract" || level === "bgroup" || level === "city") {
+      once(`level:${level}`, () => loadLevel(data, level));
+    }
+  }
+  for (const era of needs.eras || []) {
+    if (era && data.meta.sections[era]) once(`era:${era}`, () => loadEra(data, era));
+  }
+  if (needs.serviceMonth) {
+    once(`service:${needs.serviceMonth.id}`, () => loadServiceMonth(data, needs.serviceMonth));
+  }
+  if (needs.commute && data.commute) once("commute", () => loadCommuteBinaries(data.commute));
+  if (!jobs.length) return false;
+  jobs.forEach((job) => job.then(() => { job.settled = true; }, () => {}));
+  await Promise.all(jobs);
+  return true;
+}
+
+export function isPending(data, needs) {
+  const keys = [
+    ...(needs.levels || []).filter((l) => l !== "group" && l !== "none").map((l) => `level:${l}`),
+    ...(needs.eras || []).filter(Boolean).map((e) => `era:${e}`),
+    ...(needs.serviceMonth ? [`service:${needs.serviceMonth.id}`] : []),
+    ...(needs.commute && data.commute ? ["commute"] : []),
+  ];
+  return keys.some((key) => !data.pending.get(key)?.settled);
+}
+
+async function loadLevel(data, level) {
+  const { meta } = data;
+  if (level === "city") {
+    data.geo.cities = await getJson("cities.geojson");
+    return;
+  }
+  const [weeks, geo] = await Promise.all([
+    getBinary(level === "tract" ? "tract_weeks.u16" : "bgroup_weeks.u16", Uint16Array),
+    getJson(level === "tract" ? "tracts.geojson" : "blockgroups.geojson"),
+  ]);
+  data.store[level] = {
+    q: weeks,
+    scale: Float32Array.from(meta.scales[level]),
+    n: (level === "tract" ? meta.tracts : meta.bgroups).length,
+  };
+  data.domains[level] = levelDomain(data, level);
+  data.geo[level === "tract" ? "tracts" : "blockgroups"] = geo;
+}
+
+async function loadEra(data, era) {
+  const spec = data.meta.sections[era];
+  const [load, imp, corridors, nodes] = await Promise.all([
+    getBinary(`section_load_${era}.u16`, Uint16Array),
+    getBinary(`section_imp_${era}.u8`, Uint8Array),
+    getJson(`corridors_${era}.json`),
+    getJson(`nodes_${era}.json`),
+  ]);
+  data.sections[era] = {
+    load,
+    imp,
+    scale: Float32Array.from(spec.scale),
+    idIndex: new Map(spec.section_ids.map((id, index) => [id, index])),
+    weekLo: spec.week_lo,
+    nWeeks: spec.n_weeks,
+  };
+  data.corridorNodes[era] = nodes;
+  // Set last: data.corridors[era] is what readers test for.
+  data.corridors[era] = corridors;
+}
+
+async function loadServiceMonth(data, snap) {
+  const [q, routes] = await Promise.all([
+    getBinary(snap.file, Uint16Array),
+    getJson(snap.routes_file),
+  ]);
+  snap.routes = routes;
+  snap.q = q;
+}
+
+/* A city is the sum of the stop groups inside it, so its weeks are built here
+   rather than shipped: the same four measures, unquantized (scale 1). The
+   group -> city mapping goes onto meta.stop_groups beside tract and bgroup,
+   and the recovery table onto meta.recovery, so everything that already
+   reads those by level works for cities unchanged. */
+function attachCities(data, cities) {
+  const { meta, W } = data;
+  const nCities = cities.places.length;
+  const q = new Float32Array(nCities * W * 4);
+  const groups = data.store.group;
+  cities.group.forEach((city, group) => {
+    if (city < 0) return;
+    const scale = groups.scale[group];
+    for (let offset = 0; offset < W * 4; offset += 1) {
+      q[city * W * 4 + offset] += groups.q[group * W * 4 + offset] * scale;
+    }
+  });
+  data.store.city = { q, scale: new Float32Array(nCities).fill(1), n: nCities };
+  data.domains.city = levelDomain(data, "city");
+  data.cities = cities;
+  meta.stop_groups.city = cities.group;
+  meta.recovery.city = cityRecovery(data, nCities);
+}
+
+/* Same rule as corridorStats: the first month from Apr 2020 that holds the
+   threshold share of the Feb 2020 month for three straight months; -1 never,
+   -2 when the baseline is too small to judge. Months are mean weeks. */
+function cityRecovery(data, nCities) {
+  const { meta } = data;
+  const nMonths = meta.months.length;
+  const monthly = new Float64Array(nCities * nMonths);
+  const weeksIn = new Float64Array(nMonths);
+  for (let week = 0; week < data.W; week += 1) {
+    const month = data.monthIndex[week];
+    if (month < 0) continue;
+    weeksIn[month] += 1;
+    for (let city = 0; city < nCities; city += 1) {
+      monthly[city * nMonths + month] += totalAt(data, "city", city, week);
+    }
+  }
+  const startMonth = Math.max(0, meta.months.indexOf("2020-04"));
+  const sustain = 3;
+  const table = [];
+  for (let city = 0; city < nCities; city += 1) {
+    const mean = (month) => (weeksIn[month] ? monthly[city * nMonths + month] / weeksIn[month] : 0);
+    const baseline = mean(meta.recovery_baseline_month);
+    table.push(meta.recovery_thresholds.map((threshold) => {
+      if (baseline < 500) return -2;
+      for (let month = startMonth; month <= nMonths - sustain; month += 1) {
+        let sustained = true;
+        for (let offset = 0; offset < sustain && sustained; offset += 1) {
+          sustained = mean(month + offset) >= baseline * threshold;
+        }
+        if (sustained) return month;
+      }
+      return -1;
+    }));
+  }
+  return table;
 }
 
 export function rawAt(data, level, key, week, measure) {
@@ -327,6 +467,8 @@ export function metricAt(data, level, key, week, view, recThresh) {
 }
 
 export function colorFor(data, level, key, week, view, recThresh) {
+  // The service views colour corridors only; areas stay neutral beneath them.
+  if (isServiceView(view)) return null;
   if (view === "income") return incomeColor(data, level, key);
   if (view === "recovery") {
     const month = recoveryAt(data, level, key, recThresh);
@@ -378,6 +520,31 @@ export function nodeFlow(data, era, node, week) {
     net: board + boardImp - alight - alightImp,
     name: data.meta.stop_groups.name[node.g],
   };
+}
+
+/* A corridor's drawn shape. `b` (scripts/build_corridor_curves.py) is a chain
+   of cubic Beziers, flat: [lat0, lon0, then per segment c1, c2, end as lat, lon
+   pairs]. This flattens it to a polyline of [lat, lon], `steps` points per
+   segment, for drawing without curve support and for hit-testing. A bundle
+   built before the curves has no `b`, and the raw road polyline `c` is used. */
+export function corridorLatLngs(feature, steps = 6) {
+  const b = feature.b;
+  if (!b) return feature.c;
+  const out = [[b[0], b[1]]];
+  for (let i = 2; i + 5 < b.length; i += 6) {
+    const y0 = b[i - 2];
+    const x0 = b[i - 1];
+    const [y1, x1, y2, x2, y3, x3] = b.slice(i, i + 6);
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      const u = 1 - t;
+      out.push([
+        u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3,
+        u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+      ]);
+    }
+  }
+  return out;
 }
 
 export function corridorStats(data, era) {
@@ -447,8 +614,17 @@ export function corridorStats(data, era) {
   return result;
 }
 
+// Precomputed over every era by scripts/build_pack_index.py. Without the
+// index it falls back to the eras loaded so far, which can shift the ramp
+// as more eras arrive.
 export function corridorDomain(data) {
   if (data.corridorDom !== null) return data.corridorDom;
+  if (Object.keys(data.corridors).length < Object.keys(data.meta.sections).length) {
+    let values = [];
+    for (const era of Object.keys(data.corridors)) values = values.concat(corridorStats(data, era).sample);
+    values.sort((a, b) => a - b);
+    return values.length ? values[Math.floor(values.length * 0.98)] : 1;
+  }
   let values = [];
   for (const era of Object.keys(data.corridors)) {
     values = values.concat(corridorStats(data, era).sample);
@@ -482,7 +658,7 @@ export function routesFor(data, level, key, week) {
   if (level === "group") {
     routeIndexes = byEra[key] || [];
   } else {
-    const field = level === "tract" ? groups.tract : groups.bgroup;
+    const field = groups[level];
     const routeSet = new Set();
     for (let group = 0; group < groups.n; group += 1) {
       if (field[group] === key) {
@@ -584,8 +760,22 @@ export function routeStreetSeries(data, route) {
    latest complete month, so pre- and post-pandemic patterns are comparable.
    O-D files are fetched per snapshot on demand. */
 
-async function loadCommuteData() {
-  const meta = await getJson("commute_meta.json");
+// The commute view's index, available at startup so the view can be offered
+// and its snapshots follow the time bar; the binaries arrive later.
+function commuteShell(meta) {
+  return {
+    meta,
+    hourly: {},
+    rt: null,
+    loaded: false,
+    odCache: {},
+    commuteDomains: {},
+    baseIdx: meta.periods.findIndex((period) => period.id === meta.base),
+  };
+}
+
+async function loadCommuteBinaries(commute) {
+  const { meta } = commute;
   const hourly = {};
   await Promise.all(
     Object.entries(meta.hourly).map(async ([level, spec]) => {
@@ -607,15 +797,13 @@ async function loadCommuteData() {
       rt[level] = { q, scales: Float32Array.from(spec.scales), n: spec.n, nP: spec.nP };
     }),
   );
-  const baseIdx = meta.periods.findIndex((period) => period.id === meta.base);
-  return {
-    meta,
-    hourly,
-    rt: Object.keys(rt).length ? rt : null,
-    odCache: {},
-    commuteDomains: {},
-    baseIdx,
-  };
+  commute.hourly = hourly;
+  commute.rt = Object.keys(rt).length ? rt : null;
+  // Anything cached before the binaries arrived was computed from nothing.
+  commute.commuteDomains = {};
+  commute.rtTotals = {};
+  commute.arrivalCache = {};
+  commute.loaded = true;
 }
 
 /* Net round-trip commuters for one key: morning arrivals that come back in
@@ -684,19 +872,22 @@ export function commuteHourly(commute, level, key, p) {
   return { bd, al };
 }
 
-// One O-D file per snapshot, fetched on first use and cached in memory.
-export async function loadCommuteOD(commute, anchorId) {
-  if (commute.odCache[anchorId]) return commute.odCache[anchorId];
-  const spec = commute.meta.od[anchorId];
-  const q = await getBinary(spec.am.file, Uint8Array);
-  const store = {
-    q,
-    view: new DataView(q.buffer),
-    levels: spec.am.levels,
-    offsets: {},
-  };
-  commute.odCache[anchorId] = store;
-  return store;
+// One O-D file per snapshot, fetched on first use and cached. The in-flight
+// promise is cached too, so the prefetcher and the view share one download.
+export function loadCommuteOD(commute, anchorId) {
+  if (!commute.odCache[anchorId]) {
+    const spec = commute.meta.od[anchorId];
+    commute.odCache[anchorId] = getBinary(spec.am.file, Uint8Array).then((q) => ({
+      q,
+      view: new DataView(q.buffer),
+      levels: spec.am.levels,
+      offsets: {},
+    }), (error) => {
+      delete commute.odCache[anchorId];
+      throw error;
+    });
+  }
+  return commute.odCache[anchorId];
 }
 
 function levelOffsets(store, level) {
@@ -742,8 +933,7 @@ export function commuteODLists(store, level, key) {
    map recolours in the active level's key space. */
 export function commuteRegionLists(meta, store, keys, level) {
   const groups = meta.stop_groups;
-  const field = level === "tract" ? groups.tract
-    : level === "bgroup" ? groups.bgroup : null;
+  const field = level === "group" ? null : groups[level] || null;
   const keyOf = (g) => (field ? field[g] : g);
   const memberKeys = new Set(keys.map(keyOf).filter((k) => k >= 0));
   const inMap = new Map();
@@ -835,6 +1025,7 @@ export function commuteDomain(commute, level, p, field = "total") {
   const cacheKey = `${field}|${level}|${p}`;
   if (commute.commuteDomains[cacheKey]) return commute.commuteDomains[cacheKey];
   const store = commute.hourly[level];
+  if (!store) return 1;
   const values = [];
   for (let key = 0; key < store.n; key += 1) {
     const stats = commuteStats(commute, level, key, p);
@@ -876,6 +1067,7 @@ export function lodesArrivals(commute, level, p, end = "work") {
   const cacheKey = `${end}|${level}|${p}`;
   if (cache[cacheKey]) return cache[cacheKey];
   const store = commute.hourly[level];
+  if (!store) return { arrivals: new Float64Array(0), sum: 0 };
   const arrivals = new Float64Array(store.n);
   let sum = 0;
   for (let key = 0; key < store.n; key += 1) {
@@ -885,4 +1077,201 @@ export function lodesArrivals(commute, level, p, end = "work") {
   }
   cache[cacheKey] = { arrivals, sum };
   return cache[cacheKey];
+}
+
+/* ---------------------------------------------------------------- service */
+/* Observed level of service and speed per route and per corridor, from the
+   bus counters, for every month. Built by scripts/build_service_pack.py.
+   Each month carries its periods -- weekday peak, daytime, night and weekend
+   -- whose hours come from the GTFS schedule of the month's era, so all the
+   months of one signup share them. */
+
+export function isServiceView(view) {
+  return view === "speed" || view === "los";
+}
+
+// Class breaks, upper bounds. Headway: shorter is better, darkest first.
+export const HEADWAY_BREAKS = [10, 15, 20, 30, 60, Infinity];
+export const HEADWAY_COLORS = ["#104281", "#1c5cab", "#3987e5", "#6da7ec", "#9ec5f4", "#cde2fb"];
+// Speed: slow is red, fast is green, on the same ramp as the recovery views.
+export const SPEED_BREAKS = [6, 8, 10, 12, 15, 20, Infinity];
+export const SPEED_COLORS = DIVERGING_RG;
+export const NO_SERVICE = "#c9c8c2";
+
+function classColor(breaks, colors, value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return colors[breaks.findIndex((limit) => value < limit || limit === Infinity)];
+}
+
+export function headwayColor(minutes) {
+  return classColor(HEADWAY_BREAKS, HEADWAY_COLORS, minutes);
+}
+
+export function speedColor(mph) {
+  return classColor(SPEED_BREAKS, SPEED_COLORS, mph);
+}
+
+/* The snapshot the map shows at a week: the latest one at or before it whose
+   corridors are the ones drawn that week. Corridor arrays are per era, so a
+   snapshot from the previous signup cannot colour this one's corridors; the
+   first snapshot of the week's era stands in when none precedes it. */
+export function serviceSnapshot(data, week) {
+  const snapshots = data.service?.snapshots;
+  const era = eraForWeek(data, week);
+  if (!snapshots || !era) return null;
+  const month = data.meta.weeks[week].slice(0, 7);
+  // The entries themselves, not copies: a month's loaded data is kept on them.
+  const inEra = snapshots.filter((snap) => snap.era === era);
+  if (!inEra.length) return null;
+  return inEra.filter((snap) => snap.id <= month).pop() || inEra[0];
+}
+
+/* What to draw while the time bar's month is still downloading: that month if
+   it has arrived, else the nearest month of the same era that has, so the
+   corridors keep their colours instead of blanking on every step of a scrub.
+   Null only when nothing in the era is loaded yet. */
+export function displaySnapshot(data, week) {
+  const target = serviceSnapshot(data, week);
+  if (!target || target.q) return target;
+  const snapshots = data.service.snapshots;
+  const at = snapshots.indexOf(target);
+  let best = null;
+  for (let index = 0; index < snapshots.length; index += 1) {
+    const snap = snapshots[index];
+    if (!snap.q || snap.era !== target.era) continue;
+    if (!best || Math.abs(index - at) < Math.abs(snapshots.indexOf(best) - at)) best = snap;
+  }
+  return best || target;
+}
+
+/* ------------------------------------------------------------- prefetching */
+/* Loads what the time bar is about to need, in the background, one piece at a
+   time so it never competes with what the view needs right now (that goes
+   through ensureData directly). Each call replaces the queue: when the time
+   bar moves on, the old plan is dropped, though a fetch already started still
+   finishes into the cache. Everything goes through ensureData and its shared
+   promises, so nothing is fetched twice. */
+export function createPrefetcher(data) {
+  let queue = [];
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    while (queue.length) {
+      const job = queue.shift();
+      try {
+        await job();
+      } catch {
+        // A background miss is not an error: the view refetches on demand.
+      }
+    }
+    running = false;
+  };
+  return {
+    schedule(jobs) {
+      queue = jobs;
+      run();
+    },
+    ensure: (needs) => () => ensureData(data, needs),
+  };
+}
+
+/* The service months to fetch around the time bar: the ones ahead in the
+   direction it is moving first, then the ones just behind. Crossing into
+   another era also needs that era's corridors, so those ride along. */
+export function serviceLookahead(data, week, direction, ahead = 6, behind = 2) {
+  const snapshots = data.service?.snapshots;
+  const target = serviceSnapshot(data, week);
+  if (!snapshots || !target) return [];
+  const at = snapshots.indexOf(target);
+  const order = [];
+  for (let step = 1; step <= Math.max(ahead, behind); step += 1) {
+    if (step <= ahead) order.push(at + step * direction);
+    if (step <= behind) order.push(at - step * direction);
+  }
+  return order
+    .filter((index) => index >= 0 && index < snapshots.length)
+    .map((index) => ({ serviceMonth: snapshots[index], eras: [snapshots[index].era] }));
+}
+
+/* An era's corridors, when the time bar is within `weeks` of crossing into it
+   in the direction it is moving. */
+export function eraLookahead(data, week, direction, weeks = 26) {
+  const next = Math.max(0, Math.min(data.W - 1, week + direction * weeks));
+  const here = eraForWeek(data, week);
+  const there = eraForWeek(data, next);
+  return there && there !== here ? [{ eras: [there] }] : [];
+}
+
+/* The commute O-D snapshots on either side of the current one, nearest
+   first, ahead of the time bar before behind it. */
+export function commuteOdLookahead(commute, periodIdx, direction, radius = 2) {
+  if (!commute?.meta?.od) return [];
+  const ids = [];
+  for (let step = 0; step <= radius; step += 1) {
+    for (const index of step === 0 ? [periodIdx] : [periodIdx + step * direction, periodIdx - step * direction]) {
+      const period = commute.meta.periods[index];
+      if (period && commute.meta.od[period.id] && !ids.includes(period.id)) ids.push(period.id);
+    }
+  }
+  return ids;
+}
+
+// [corridor][period][headway, mph] in tenths for one month; null marks no
+// data. The month's file is loaded on demand -- until then there is nothing.
+export function corridorService(data, snap, index) {
+  if (!snap?.q || index >= snap.n) return null;
+  const { null: none } = data.service;
+  const { q } = snap;
+  const base = index * 8;
+  const read = (offset) => (q[base + offset] === none ? null : q[base + offset] / 10);
+  return {
+    headway: [0, 1, 2, 3].map((p) => read(p * 2)),
+    mph: [0, 1, 2, 3].map((p) => read(p * 2 + 1)),
+  };
+}
+
+export function routeService(snap, route) {
+  return snap?.routes?.[route] || null;
+}
+
+/* Windows are on the service day's extended clock (hours past 24 are after
+   midnight), so they are folded onto a 24-hour day and printed as runs that
+   may wrap midnight. Owl trips of the previous service day run on past 6am,
+   so an after-midnight hour already claimed by another period of the same
+   day type on the ordinary clock is left out: night reads "22:00-6:00", not
+   "22:00-8:00" overlapping the morning. */
+export function periodHours(period, periods = []) {
+  const claimed = new Array(24).fill(false);
+  for (const other of periods) {
+    if (other === period || other.days !== period.days) continue;
+    for (const [a, b] of other.windows) {
+      for (let hour = a; hour < Math.min(b, 24); hour += 1) claimed[hour] = true;
+    }
+  }
+  const on = new Array(24).fill(false);
+  for (const [a, b] of period.windows) {
+    for (let hour = a; hour < b; hour += 1) {
+      if (hour < 24 || !claimed[hour % 24]) on[hour % 24] = true;
+    }
+  }
+  if (!on.some(Boolean)) return "none detected";
+  if (on.every(Boolean)) return "all day";
+  const start = on.findIndex((value, hour) => value && !on[(hour + 23) % 24]);
+  const runs = [];
+  for (let step = 0; step < 24; step += 1) {
+    const hour = (start + step) % 24;
+    if (on[hour] && !on[(hour + 23) % 24]) runs.push([hour, hour]);
+    if (on[hour]) runs[runs.length - 1][1] = (hour + 1) % 24;
+  }
+  return runs.sort((x, y) => x[0] - y[0]).map(([a, b]) => `${a}:00-${b || 24}:00`).join(", ");
+}
+
+export function formatHeadway(minutes) {
+  if (minutes === null || minutes === undefined) return "no service";
+  return minutes >= 90 ? `${(minutes / 60).toFixed(1)} h` : `${Math.round(minutes)} min`;
+}
+
+export function formatMph(mph) {
+  return mph === null || mph === undefined ? "-" : `${mph.toFixed(1)} mph`;
 }

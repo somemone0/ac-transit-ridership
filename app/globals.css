@@ -701,3 +701,51 @@ label.inline select {
     width: 180px;
   }
 }
+
+/* The service period selector has four buttons, so the inner ones share
+   borders instead of doubling them. */
+.seg-wrap .segbtn + .segbtn {
+  border-left: 0;
+}
+
+.seg-wrap .segbtn:not(:first-child):not(:last-child) {
+  border-radius: 0;
+}
+
+.service-table {
+  width: 100%;
+  margin-bottom: 4px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.service-table th {
+  color: var(--text-muted);
+  font-weight: 500;
+  text-align: right;
+}
+
+.service-table td {
+  padding: 1px 0;
+  text-align: right;
+}
+
+.service-table td.k {
+  text-align: left;
+}
+
+/* On-demand data for a view is on its way. Small and out of the map's way:
+   the rest of the page keeps working while it loads. */
+.loading-chip {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  z-index: 1200;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
+  transform: translateX(-50%);
+}

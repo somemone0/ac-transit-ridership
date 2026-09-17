@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SelectionChart } from "../Charts";
-import { loadVisualizationData, selectionSeries } from "../ridership-data";
+import { ensureData, everything, loadVisualizationData, selectionSeries } from "../ridership-data";
 import StoryMap from "./StoryMap";
 import { prepareStory, resolvePlaces } from "./prepare";
 import { BOUNDS, MAP_ONE, MAP_TWO, RECOVERY_SCENE, resolveScene, resolveScenes } from "./steps";
@@ -161,7 +161,13 @@ export default function Story() {
 
   useEffect(() => {
     let cancelled = false;
+    // The story reads block groups, every era's corridors and the commute
+    // profiles, so it loads everything the explorer would fetch on demand.
     loadVisualizationData()
+      .then(async (loaded) => {
+        await ensureData(loaded, everything(loaded));
+        return loaded;
+      })
       .then((loaded) => { if (!cancelled) setData(loaded); })
       .catch((loadError) => { if (!cancelled) setError(loadError); });
     return () => { cancelled = true; };

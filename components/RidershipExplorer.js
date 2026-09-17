@@ -25,13 +25,35 @@ import {
   commuteStats,
   corridorColor,
   corridorDomain,
+  corridorLatLngs,
   corridorStats,
+  corridorService,
+  commuteOdLookahead,
+  createPrefetcher,
+  displaySnapshot,
+  ensureData,
   eraForWeek,
+  eraLookahead,
   escapeHtml,
   fmt,
+  formatHeadway,
+  formatMph,
+  HEADWAY_BREAKS,
+  HEADWAY_COLORS,
+  headwayColor,
+  isServiceView,
+  NO_SERVICE,
+  periodHours,
+  routeService,
+  serviceLookahead,
+  serviceSnapshot,
+  SPEED_BREAKS,
+  SPEED_COLORS,
+  speedColor,
   imputedAt,
   incomeAt,
   incomeDomain,
+  isPending,
   lodesArrivals,
   lodesAt,
   lodesYearFor,
@@ -209,6 +231,12 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
 
 function getCachedRouteSeries(data, route) {
   if (!data.routeSeriesCache) data.routeSeriesCache = {};
+  // A route's series spans every era; until they are all loaded it is
+  // partial, so it is recomputed rather than cached.
+  const complete = Object.keys(data.corridors).length === Object.keys(data.meta.sections).length;
+  if (!complete) {
+    return { own: routeOwnSeries(data, route), street: routeStreetSeries(data, route) };
+  }
   if (!data.routeSeriesCache[route]) {
     data.routeSeriesCache[route] = {
       own: routeOwnSeries(data, route),
@@ -278,6 +306,7 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
           </>
         ) : null}
       </div>
+      <RouteServiceTable data={data} route={route} week={week} />
       <h4>Weekly onboard load (person-segments) 2019-2026</h4>
       <SeriesChart series={series} meta={meta} />
       <CommutePanel
@@ -316,6 +345,40 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
   );
 }
 
+/* Observed headway, trips and speed for each service period, from the bus
+   counters in the snapshot month the time bar sits in. */
+function RouteServiceTable({ data, route, week }) {
+  const snap = displaySnapshot(data, week);
+  const service = snap?.routes ? routeService(snap, route) : null;
+  if (!service) return null;
+  return (
+    <>
+      <h4>Level of service · {snap.label}</h4>
+      <table className="service-table">
+        <thead>
+          <tr><th /><th>Headway</th><th>Trips</th><th>Speed</th></tr>
+        </thead>
+        <tbody>
+          {snap.periods.map((period, index, snapPeriods) => (
+            <tr key={period.id} title={periodHours(period, snapPeriods)}>
+              <td className="k">{period.label}</td>
+              <td>{period.windows.length ? formatHeadway(service.headway[index]) : "-"}</td>
+              <td>{period.windows.length ? fmt(service.trips[index]) : "-"}</td>
+              <td>{period.windows.length ? formatMph(service.mph[index]) : "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="hint">
+        From the bus counters. Trips are the distinct scheduled starts seen that month, both
+        directions (weekend: Saturday and Sunday averaged); headway is the hours the line
+        runs in the period over its trips per direction. Speed includes dwell. Hover a row
+        for its hours.
+      </p>
+    </>
+  );
+}
+
 function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange, onClose, commute, periodIdx, commuteCells }) {
   return (
     <aside id="detailPanel">
@@ -350,7 +413,50 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
   );
 }
 
-function Legend({ data, view, level, recThresh, commute, commuteCells, period, commuteFocus, commuteFocusMode, focusMax }) {
+function ServiceLegend({ data, view, servicePeriod, week }) {
+  const snap = displaySnapshot(data, week);
+  const target = serviceSnapshot(data, week);
+  if (!snap) return <p className="hint">No counter snapshot covers this week's corridors.</p>;
+  const period = snap.periods[servicePeriod];
+  const snapPeriods = snap.periods;
+  const los = view === "los";
+  const breaks = los ? HEADWAY_BREAKS : SPEED_BREAKS;
+  const colors = los ? HEADWAY_COLORS : SPEED_COLORS;
+  const unit = los ? "min" : "mph";
+  return (
+    <>
+      {breaks.map((limit, index) => {
+        const lower = index === 0 ? null : breaks[index - 1];
+        const label = lower === null
+          ? `under ${limit} ${unit}`
+          : limit === Infinity ? `${lower}+ ${unit}` : `${lower}-${limit} ${unit}`;
+        return (
+          <div className="legend-swatch" key={limit}>
+            <span style={{ background: colors[index] }} />
+            <span>{label}</span>
+          </div>
+        );
+      })}
+      {los ? (
+        <div className="legend-swatch"><span style={{ background: NO_SERVICE }} /><span>no trips in this period</span></div>
+      ) : null}
+      {target && snap !== target ? (
+        <p className="hint">Showing {snap.label} while {target.label} loads.</p>
+      ) : null}
+      <p className="hint">
+        {period.label}, {snap.label}: {period.days === "weekend" ? "Sat & Sun" : "Mon-Fri"}{" "}
+        {periodHours(period, snapPeriods)}. The hours come from the {snap.era} GTFS schedule:
+        where its buses-in-service profile steps up and down.{" "}
+        {los
+          ? "Corridor headway counts every line on the street: the hours it runs over its trips per direction, averaged over the directions served."
+          : "Average speed between stop groups from door-open times, dwell included, weighted by trips."}{" "}
+        From the bus counters; width encodes onboard load.
+      </p>
+    </>
+  );
+}
+
+function Legend({ data, view, level, recThresh, commute, commuteCells, period, commuteFocus, commuteFocusMode, focusMax, servicePeriod, week }) {
   if (!data) return null;
   const { meta } = data;
   const bar = (colors) => (
@@ -362,6 +468,12 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     <div className="legend-labels"><span>{left}</span><span>{right}</span></div>
   );
 
+  if (isServiceView(view)) {
+    return <ServiceLegend data={data} view={view} servicePeriod={servicePeriod} week={week} />;
+  }
+  if (level !== "none" && !data.store[level]) {
+    return <p className="hint">Loading this level...</p>;
+  }
   if (level === "none") {
     return <p className="hint">Areas hidden. Corridor width and colour show onboard load; hover any corridor for its routes.</p>;
   }
@@ -758,11 +870,22 @@ function renderDataLayer(api, data, options) {
     return;
   }
 
-  const source = level === "tract" ? "tracts" : "blockgroups";
+  const source = { tract: "tracts", bgroup: "blockgroups", city: "cities" }[level];
+  // Not fetched yet: clear the old level rather than colour this one's
+  // shapes with nothing. The layer is drawn once the load triggers a render.
+  if (!data.geo[source] || !data.store[level]) {
+    if (api.dataMode !== "loading") {
+      dataLayer.clearLayers();
+      api.dataMode = "loading";
+    }
+    return;
+  }
   if (!api.geoLayers) api.geoLayers = {};
   if (!api.geoIndexes) api.geoIndexes = {};
   if (!api.geoLayers[level]) {
-    const ids = level === "tract" ? data.meta.tracts : data.meta.bgroups;
+    const ids = level === "tract" ? data.meta.tracts
+      : level === "bgroup" ? data.meta.bgroups
+        : data.cities.places.map((place) => place.geoid);
     const index = new Map(ids.map((id, index) => [String(id), index]));
     api.geoIndexes[level] = index;
     api.geoLayers[level] = L.geoJSON(data.geo[source], {
@@ -824,13 +947,23 @@ function pointBounds(points) {
   return bounds;
 }
 
-function corridorMetrics(data, era, index, week, view, recThresh) {
+function corridorMetrics(data, era, index, week, view, recThresh, servicePeriod) {
   let load = 0;
   let imp = 0;
   for (const sectionId of data.corridors[era][index].s) {
     const [sectionLoadValue, imputedFraction] = sectionLoad(data, era, sectionId, week);
     load += sectionLoadValue;
     imp += sectionLoadValue * imputedFraction;
+  }
+  if (isServiceView(view)) {
+    // Drawn whether or not the APCs saw load here: the schedule is the source.
+    const service = corridorService(data, displaySnapshot(data, week), index);
+    if (!service) return null;
+    const color = view === "los"
+      ? headwayColor(service.headway[servicePeriod]) || NO_SERVICE
+      : speedColor(service.mph[servicePeriod]);
+    if (!color) return null;
+    return { load, imp, color, thickness: Math.min(1, Math.sqrt(load / corridorDomain(data))), service: true };
   }
   if (load <= 0 && view !== "recovery" && view !== "rel") return null;
   const color = corridorColor(data, era, index, load, imp, view, recThresh);
@@ -917,9 +1050,18 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
       projectionCache = { source: projectionSource, zoom, points: new Map() };
     }
     const pixelOrigin = map.getPixelOrigin();
-    const worldPointsFor = (key, coordinates) => {
+    // Per corridor, projected once per zoom: `anchors` are the Bezier chain's
+    // points (start, then control, control, end per segment) for drawing, and
+    // `samples` the curve flattened for bounds and hit-testing. A piece with
+    // no curve draws its raw polyline.
+    const worldShapeFor = (key, feature) => {
       if (!projectionCache.points.has(key)) {
-        projectionCache.points.set(key, coordinates.map((coordinate) => map.project(coordinate, zoom)));
+        const project = (lat, lon) => map.project([lat, lon], zoom);
+        const b = feature.b;
+        const anchors = [];
+        if (b) for (let i = 0; i + 1 < b.length; i += 2) anchors.push(project(b[i], b[i + 1]));
+        const samples = corridorLatLngs(feature).map(([lat, lon]) => project(lat, lon));
+        projectionCache.points.set(key, { anchors: b ? anchors : null, samples });
       }
       return projectionCache.points.get(key);
     };
@@ -930,20 +1072,28 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
     const records = [];
     const selectedRoute = options.selectedRoute;
     features.forEach((feature, index) => {
-      const metrics = corridorMetrics(data, options.era, index, options.week, options.view, options.recThresh);
+      if (options.onlySelected && !feature.r.some(
+        (routeDirection) => routeDirection.split("|")[0] === selectedRoute,
+      )) return;
+      const metrics = corridorMetrics(
+        data, options.era, index, options.week, options.view, options.recThresh, options.servicePeriod,
+      );
       if (!metrics) return;
       const selectedCorridor = selectedRoute && feature.r.some(
         (routeDirection) => routeDirection.split("|")[0] === selectedRoute,
       );
-      const points = worldPointsFor(index, feature.c).map((projected) => ({
+      const shape = worldShapeFor(index, feature);
+      const toScreen = (projected) => ({
         x: projected.x - pixelOrigin.x - origin.x,
         y: projected.y - pixelOrigin.y - origin.y,
-      }));
+      });
+      const points = shape.samples.map(toScreen);
       const bounds = pointBounds(points);
       if (bounds.maxX < -80 || bounds.minX > size.x + 80 || bounds.maxY < -80 || bounds.minY > size.y + 80) return;
       const routes = [...new Set(feature.r.map((routeDirection) => routeDirection.split("|")[0]))];
       records.push({
         points,
+        curve: shape.anchors ? shape.anchors.map(toScreen) : null,
         ...bounds,
         routes,
         route: routes[0],
@@ -951,7 +1101,10 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
         imp: metrics.imp,
         color: metrics.color,
         weight: (selectedCorridor ? 2.5 : 1) + metrics.thickness * (selectedCorridor ? 8 : 7),
-        opacity: selectedCorridor ? 0.95 : selectedRoute ? 0.07 : 0.32 + metrics.thickness * 0.35,
+        // Service colours are classes, and a faint class reads as the wrong
+        // one, so those views draw near-opaque regardless of load.
+        opacity: selectedCorridor ? 0.95 : selectedRoute ? 0.07
+          : metrics.service ? 0.85 : 0.32 + metrics.thickness * 0.35,
         corridorIndex: index,
         selected: !!selectedCorridor,
       });
@@ -961,14 +1114,26 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
     records.sort((first, second) => Number(first.selected) - Number(second.selected));
     for (const record of records) {
       context.beginPath();
-      record.points.forEach((point, index) => {
-        if (index === 0) context.moveTo(point.x, point.y);
-        else context.lineTo(point.x, point.y);
-      });
+      if (record.curve) {
+        const [start, ...rest] = record.curve;
+        context.moveTo(start.x, start.y);
+        for (let i = 0; i + 2 < rest.length; i += 3) {
+          context.bezierCurveTo(rest[i].x, rest[i].y, rest[i + 1].x, rest[i + 1].y, rest[i + 2].x, rest[i + 2].y);
+        }
+      } else {
+        record.points.forEach((point, index) => {
+          if (index === 0) context.moveTo(point.x, point.y);
+          else context.lineTo(point.x, point.y);
+        });
+      }
       context.strokeStyle = record.color;
       context.globalAlpha = record.opacity;
       context.lineWidth = record.weight;
-      context.lineCap = "round";
+      // Curved pieces meet end to end on a shared tangent, so flat ends butt
+      // together into one continuous line that changes colour and width only
+      // at a node. Round ends would overlap there, and at partial opacity
+      // every join would draw as a darker bead.
+      context.lineCap = record.curve ? "butt" : "round";
       context.lineJoin = "round";
       context.stroke();
       record.hitWidth = Math.max(7, record.weight / 2 + 3);
@@ -1103,6 +1268,8 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
       record.imp,
       options.view,
       options.recThresh,
+      options.servicePeriod,
+      options.week,
     );
     tooltip
       .setContent(tooltipHtml)
@@ -1170,8 +1337,22 @@ function nodeHoverHtml(flow) {
     <div class="row"><span class="k">Net at this stop group</span><span>${arrow} ${Math.abs(Math.round(flow.net)).toLocaleString()}</span></div></div>`;
 }
 
-function corridorHoverHtml(data, era, index, load, imp, view, recThresh) {
+function corridorHoverHtml(data, era, index, load, imp, view, recThresh, servicePeriod, week) {
   let extra = "";
+  const snap = isServiceView(view) ? displaySnapshot(data, week) : null;
+  const service = snap ? corridorService(data, snap, index) : null;
+  if (service) {
+    // Every period, the active one in bold, so a hover answers "how does
+    // this street compare at night" without touching the selector.
+    extra = snap.periods.map((period, p) => {
+      const text = period.windows.length
+        ? `${formatHeadway(service.headway[p])} · ${formatMph(service.mph[p])}`
+        : "no peak";
+      return `<div class="row"><span class="k">${escapeHtml(period.label)}</span><span>${
+        p === servicePeriod ? `<b>${text}</b>` : text
+      }</span></div>`;
+    }).join("");
+  }
   const stats = corridorStats(data, era);
   const baseline = stats.base[index];
   if (view === "rel") {
@@ -1456,22 +1637,22 @@ function CommutePanel({ data, commute, level, keyIndex, p }) {
 
 function renderMapLayers(api, data, options) {
   const { routeCanvas } = api;
-  const { week, view, level, showRoutes, detail, recThresh } = options;
+  const { week, view, level, detail, recThresh } = options;
   renderDataLayer(api, data, options);
 
-  if (!showRoutes) {
-    routeCanvas?.setOptions({ visible: false });
-    return;
-  }
+  // Corridors belong to the stop-group map (and the routes-only one). Over
+  // tracts, block groups and cities they bury the areas, so there only an
+  // opened route's own corridors are drawn, to keep it findable.
+  const selectedRoute = detail?.lv === "route" ? detail.key : null;
+  const corridorLevel = level === "group" || level === "none";
   const era = eraForWeek(data, week);
-  if (!era || !data.corridors[era]) {
+  if (!era || !data.corridors[era] || (!corridorLevel && !selectedRoute)) {
     routeCanvas?.setOptions({ visible: false });
     return;
   }
   corridorStats(data, era);
   corridorDomain(data);
   const features = data.corridors[era];
-  const selectedRoute = detail?.lv === "route" ? detail.key : null;
 
   // Corridors are the shared street representation. Each path is drawn once
   // and carries all routes that use it, so overlapping services do not turn
@@ -1485,8 +1666,10 @@ function renderMapLayers(api, data, options) {
     week,
     view: view === "commute" || view === "income" ? "total" : view,
     recThresh,
+    servicePeriod: options.servicePeriod,
     selectedRoute,
-    nodes: data.corridorNodes?.[era] || null,
+    onlySelected: !corridorLevel,
+    nodes: corridorLevel ? data.corridorNodes?.[era] || null : null,
     groupMarkers: level === "group" ? api.groupMarkers : null,
   });
 }
@@ -1498,8 +1681,10 @@ export default function RidershipExplorer() {
   const [week, setWeek] = useState(0);
   const [view, setView] = useState("total");
   const [level, setLevel] = useState("group");
-  const [showRoutes, setShowRoutes] = useState(true);
   const [recThresh, setRecThresh] = useState(3);
+  const [servicePeriod, setServicePeriod] = useState(0);
+  // Bumped whenever on-demand data lands, so the map and panels redraw.
+  const [loadTick, setLoadTick] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [detail, setDetail] = useState(null);
   const [selection, setSelection] = useState(null);
@@ -1561,10 +1746,82 @@ export default function RidershipExplorer() {
   }
   const odInFlightRef = useRef(null);
 
+  // What the current view needs beyond the startup bundle. A route's detail
+  // charts every era and shows its month of service; any detail panel shows
+  // the commute profile.
+  const needs = data ? {
+    levels: [level],
+    eras: detail?.lv === "route" ? Object.keys(data.meta.sections) : [eraForWeek(data, week)],
+    serviceMonth: data.service && (isServiceView(view) || detail?.lv === "route")
+      ? serviceSnapshot(data, week) : null,
+    commute: view === "commute" || !!detail,
+  } : null;
+  const needsKey = needs ? JSON.stringify({ ...needs, serviceMonth: needs.serviceMonth?.id }) : "";
+  const loadingData = !!needs && isPending(data, needs);
+  useEffect(() => {
+    if (!data) return undefined;
+    let cancelled = false;
+    ensureData(data, needs)
+      .then((changed) => { if (changed && !cancelled) setLoadTick((tick) => tick + 1); })
+      .catch((loadError) => { if (!cancelled) setError(loadError); });
+    return () => { cancelled = true; };
+    // needsKey stands for needs; the object itself is new every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, needsKey]);
+
+  // Predictive buffering. Which way the time bar last moved decides what is
+  // "ahead"; play always moves forward. A short pause before planning lets a
+  // fast drag settle, so the queue follows where the bar is going rather than
+  // every week it passed through.
+  const prefetcherRef = useRef(null);
+  const lastWeekRef = useRef(null);
+  const directionRef = useRef(1);
+  if (lastWeekRef.current !== null && week !== lastWeekRef.current) {
+    directionRef.current = week > lastWeekRef.current ? 1 : -1;
+  }
+  lastWeekRef.current = week;
+  const focusActive = view === "commute" && !!commuteFocus;
+  useEffect(() => {
+    if (!data) return undefined;
+    if (!prefetcherRef.current || prefetcherRef.current.data !== data) {
+      prefetcherRef.current = { data, ...createPrefetcher(data) };
+    }
+    const prefetcher = prefetcherRef.current;
+    const direction = playing ? 1 : directionRef.current;
+    const timer = window.setTimeout(() => {
+      const jobs = [];
+      // The next era's corridors first when a crossing is near: they are the
+      // biggest thing a scrub can hit, and every view draws them.
+      for (const needs of eraLookahead(data, week, direction)) jobs.push(prefetcher.ensure(needs));
+      if (isServiceView(view)) {
+        for (const needs of serviceLookahead(data, week, direction)) jobs.push(prefetcher.ensure(needs));
+      }
+      if (focusActive && data.commute) {
+        for (const id of commuteOdLookahead(data.commute, commutePeriodIdx, direction)) {
+          jobs.push(() => loadCommuteOD(data.commute, id));
+        }
+      } else if (view === "commute" && data.commute) {
+        // No focus yet: the snapshot a click would open.
+        const id = data.commute.meta.periods[commutePeriodIdx]?.id;
+        if (id && data.commute.meta.od?.[id]) jobs.push(() => loadCommuteOD(data.commute, id));
+      }
+      prefetcher.schedule(jobs);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [data, week, view, playing, focusActive, commutePeriodIdx]);
+
   // LODES is published per tract, so the All-commuters and Compare modes only
   // exist at tract level; entering them moves the map and greys the selector.
   const commuteLocksTract = view === "commute"
     && commuteLocksTractFor(commuteCells);
+  // Speed and level of service live on the corridors, which only the
+  // stop-group and routes-only maps draw.
+  const serviceLocksCorridors = isServiceView(view);
+  useEffect(() => {
+    if (!serviceLocksCorridors) return;
+    setLevel((current) => (current === "group" || current === "none" ? current : "group"));
+    setDetail((current) => (current && current.lv !== "route" && current.lv !== "group" ? null : current));
+  }, [serviceLocksCorridors]);
   useEffect(() => {
     if (!commuteLocksTract) return;
     setLevel((current) => (current === "tract" ? current : "tract"));
@@ -1576,14 +1833,17 @@ export default function RidershipExplorer() {
   // to (or from) it; the O-D file for the time bar's snapshot is fetched on
   // demand and refetched here whenever the snapshot moves under an active
   // focus (the week slider drives the snapshot).
+  // While the next snapshot downloads, the focus keeps the flows it has
+  // (`listsAnchor` records whose they are) rather than dropping them, which
+  // used to flash the whole map back to the unfocused colours on every step.
   useEffect(() => {
     if (!commute || !commuteFocus) return;
     const anchorId = commute.meta.periods[commutePeriodIdx].id;
     if (commuteFocus.anchor !== anchorId) {
-      setCommuteFocus((current) => current ? { ...current, anchor: anchorId, lists: null } : current);
+      setCommuteFocus((current) => current ? { ...current, anchor: anchorId } : current);
       return;
     }
-    if (commuteFocus.lists) return;
+    if (commuteFocus.lists && commuteFocus.listsAnchor === anchorId) return;
     const token = `${anchorId}|${commuteFocus.level}|${commuteFocus.key}`;
     if (odInFlightRef.current === token) return;
     odInFlightRef.current = token;
@@ -1593,15 +1853,19 @@ export default function RidershipExplorer() {
           if (!current || current.anchor !== anchorId
             || current.level !== commuteFocus.level) return current;
           if (current.kind === "region") {
-            return { ...current, lists: commuteRegionLists(data.meta, store, current.keys, current.level) };
+            return {
+              ...current,
+              listsAnchor: anchorId,
+              lists: commuteRegionLists(data.meta, store, current.keys, current.level),
+            };
           }
           if (current.key !== commuteFocus.key) return current;
-          return { ...current, lists: commuteODLists(store, current.level, current.key) };
+          return { ...current, listsAnchor: anchorId, lists: commuteODLists(store, current.level, current.key) };
         });
       })
       .catch(() => {
         setCommuteFocus((current) => current && current.anchor === anchorId
-          ? { ...current, lists: { in: [], out: [] } }
+          ? { ...current, listsAnchor: anchorId, lists: { in: [], out: [] } }
           : current);
       })
       .finally(() => {
@@ -1816,9 +2080,9 @@ export default function RidershipExplorer() {
       week,
       view,
       level,
-      showRoutes,
       detail,
       recThresh,
+      servicePeriod,
       commute: data.commute,
       commuteCells,
       commutePeriodIdx,
@@ -1830,13 +2094,16 @@ export default function RidershipExplorer() {
         onMapClick: (...args) => callbacksRef.current.onMapClick(...args),
       },
     });
-  }, [data, mapReady, week, view, level, showRoutes, detail, recThresh, commuteCells, commutePeriodIdx, commuteFocus, commuteFocusMode]);
+  }, [data, mapReady, loadTick, week, view, level, detail, recThresh, servicePeriod, commuteCells, commutePeriodIdx, commuteFocus, commuteFocusMode]);
 
   useEffect(() => {
     if (!playing || !data) return undefined;
     const timer = window.setInterval(() => setWeek((current) => (current + 1) % data.W), 220);
     return () => window.clearInterval(timer);
   }, [playing, data]);
+
+  const levelLocked = (value) => (commuteLocksTract && value !== "tract")
+    || (serviceLocksCorridors && value !== "group" && value !== "none");
 
   let systemTotal = 0;
   let systemImputed = 0;
@@ -1863,6 +2130,7 @@ export default function RidershipExplorer() {
               ["recovery", "Recovery time"],
               ...(data?.meta?.income ? [["income", "Median income"]] : []),
               ...(data?.commute ? [["commute", "Commute pattern"]] : []),
+              ...(data?.service ? [["speed", "Speed per corridor"], ["los", "Level of service"]] : []),
             ].map(([value, label]) => (
               <label key={value}>
                 <input
@@ -1890,6 +2158,27 @@ export default function RidershipExplorer() {
                   of Feb 2020
                 </label>
                 <p className="hint">Colour = when the area first held that level for three straight months. Independent of the time bar.</p>
+              </div>
+            ) : null}
+            {isServiceView(view) && data?.service ? (
+              <div id="recCtl">
+                <div className="seg seg-wrap">
+                  {(displaySnapshot(data, week)?.periods || data.service.snapshots[0].periods).map((period, index, snapPeriods) => (
+                    <button
+                      key={period.id}
+                      type="button"
+                      title={periodHours(period, snapPeriods)}
+                      className={`segbtn${servicePeriod === index ? " on" : ""}`}
+                      onClick={() => setServicePeriod(index)}
+                    >
+                      {period.label.replace("Weekday ", "")}
+                    </button>
+                  ))}
+                </div>
+                <p className="hint">
+                  Corridors coloured by {view === "los" ? "headway" : "speed"} measured by the bus counters. Hover a
+                  corridor for every period; open a route for its own table.
+                </p>
               </div>
             ) : null}
             {view === "commute" && data?.commute ? (
@@ -1984,15 +2273,16 @@ export default function RidershipExplorer() {
               ["group", "Stop groups"],
               ["bgroup", "Block groups"],
               ["tract", "Census tracts"],
+              ...(data?.cities ? [["city", "Cities"]] : []),
               ["none", "None (routes only)"],
             ].map(([value, label]) => (
-              <label key={value} style={commuteLocksTract && value !== "tract" ? { opacity: 0.55 } : undefined}>
+              <label key={value} style={levelLocked(value) ? { opacity: 0.55 } : undefined}>
                 <input
                   type="radio"
                   name="level"
                   value={value}
                   checked={level === value}
-                  disabled={commuteLocksTract && value !== "tract"}
+                  disabled={levelLocked(value)}
                   onChange={(event) => {
                     const nextLevel = event.target.value;
                     setLevel(nextLevel);
@@ -2006,15 +2296,11 @@ export default function RidershipExplorer() {
             {commuteLocksTract ? (
               <p className="hint">All workplaces and All homes are tract-level: LODES is published per tract.</p>
             ) : null}
-          </section>
-
-          <section>
-            <h2>Routes</h2>
-            <label>
-              <input type="checkbox" checked={showRoutes} onChange={(event) => setShowRoutes(event.target.checked)} />
-              Show corridors
-            </label>
-            <p className="hint">Line width = onboard load; line colour follows the active view (same ramps as the areas). Corridors merge routes sharing a road. Click a corridor to pick a line.</p>
+            {serviceLocksCorridors ? (
+              <p className="hint">Speed and level of service are drawn on the corridors, shown with stop groups or routes only.</p>
+            ) : (
+              <p className="hint">Corridors show with stop groups and routes only; line width is onboard load. Click a corridor to pick a line.</p>
+            )}
           </section>
 
           <section id="legendBox">
@@ -2029,6 +2315,8 @@ export default function RidershipExplorer() {
               period={data?.commute ? data.commute.meta.periods[commutePeriodIdx] : null}
               commuteFocus={commuteFocus}
               commuteFocusMode={commuteFocusMode}
+              servicePeriod={servicePeriod}
+              week={week}
               focusMax={commuteFocus?.lists
                 ? (commuteFocusMode === "from"
                   ? commuteFocus.lists.out[0]?.flow
@@ -2131,7 +2419,8 @@ export default function RidershipExplorer() {
           </div>
         </footer>
       </div>
-      {loading ? <div id="loading">Loading ~30 MB of prepacked data...</div> : null}
+      {loading ? <div id="loading">Loading ridership data...</div> : null}
+      {!loading && loadingData ? <div className="loading-chip">Loading data for this view...</div> : null}
       {error ? (
         <div className="error-state">
           <div><strong>Unable to load the visualization</strong>{error.message}</div>

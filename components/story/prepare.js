@@ -1,4 +1,4 @@
-import { totalAt } from "../ridership-data";
+import { corridorLatLngs, totalAt } from "../ridership-data";
 import { BERKELEY_BOUNDARY } from "./berkeley-boundary";
 
 // Web Mercator at zoom 0 (a 256 px world), identical to Leaflet's EPSG:3857
@@ -119,7 +119,8 @@ export function prepareStory(data) {
 
   const corridors = {};
   for (const [era, features] of Object.entries(data.corridors)) {
-    corridors[era] = features.map((feature) => projectRing(feature.c, false));
+    // The smoothed corridor curve, flattened: see corridorLatLngs.
+    corridors[era] = features.map((feature) => projectRing(corridorLatLngs(feature), false));
   }
 
   const prepared = {

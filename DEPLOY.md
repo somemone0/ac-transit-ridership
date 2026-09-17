@@ -26,7 +26,7 @@ between the two.
 | Cloud Run service | `ac-transit-ridership` |
 | Live URL | `https://ac-transit-ridership-385939155005.us-west1.run.app` |
 | Data bucket | `gs://ac-transit-ridership-pack` |
-| Data base URL (live) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack-2026-09-11` |
+| Data base URL (live) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack-2026-09-16` |
 | Data base URL (default in Dockerfile) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack` |
 | Build service account | `385939155005-compute@developer.gserviceaccount.com` |
 | HF dataset | `somemone/ac-transit-apc` |
@@ -126,7 +126,7 @@ the CARTO key, so it always lands on the OSM fallback.
 
 ## Updating the data bundle
 
-**Which prefix is live.** The deployed revision reads `pack-2026-09-11`, not
+**Which prefix is live.** The deployed revision reads `pack-2026-09-16`, not
 `pack`, because a dated prefix was the only way to get a data fix out without
 waiting a day for cached copies of `pack/` to expire. Upload new data to the
 prefix the running revision uses — check it with:
@@ -189,6 +189,39 @@ gcloud storage cp commute_meta.json gs://ac-transit-ridership-pack/pack/ \
 
 Then regenerate and upload the manifest as above. The meta's short cache
 only applies once the edge has let go of the previous copy.
+
+### Updating only the service pack
+
+Same pattern as the commute pack. `scripts/build_service_pack.py` writes one
+content-hashed pair per month (`service_<YYYY-MM>.<hash>.u16` and
+`service_routes_<YYYY-MM>.<hash>.json`), and `service_meta.json` names them.
+The client fetches only the month the time bar is on, so upload the monthly
+files first and the meta last, with a short cache:
+
+```bash
+cd public/data/pack
+gcloud storage cp service_20*.*.u16 service_routes_*.*.json gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=86400"
+gcloud storage cp service_meta.json gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=300"
+```
+
+### After rebuilding the corridors
+
+`vis/build_corridor_graph.py` writes plain road polylines. Run
+`python3 scripts/build_corridor_curves.py` afterwards: it adds the smooth
+Bezier geometry (`b`) the app draws, with pieces snapped end to end and
+through-lines tangent-continuous at nodes. It changes geometry only, so
+nothing indexed by corridor needs rebuilding. Without it the app falls back to
+the raw polylines.
+
+### After changing meta.json or the section loads
+
+Run `python3 scripts/build_pack_index.py` and upload `pack_index.json`. It
+holds the corridor colour domain over every era, which the client can no
+longer compute at startup because it loads each era's corridors on demand.
+Without it the ramp is computed from the eras loaded so far and shifts as
+more arrive.
 
 ## Verifying a deploy
 
