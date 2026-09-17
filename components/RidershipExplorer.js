@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { HourlyChart, SelectionChart, SeriesChart } from "./Charts";
+import RidershipSpeedChart from "./RidershipSpeedChart";
 import {
   DIVERGING,
   DIVERGING_RG,
@@ -62,6 +63,7 @@ import {
   nodeFlow,
   ramp,
   rawAt,
+  regionSpeed,
   routeBoardings,
   routeOwnSeries,
   routeStreetSeries,
@@ -119,7 +121,7 @@ function StatRows({ data, level, keyIndex, week }) {
       <Row label="Boardings">
         <DisclosureValue real={boardReal} imp={boardImp} />
       </Row>
-      <Row label="Alightings">
+      <Row label="Drop-offs">
         <DisclosureValue real={alightReal} imp={alightImp} />
       </Row>
       <Row label="Ridership">
@@ -142,16 +144,14 @@ function CommuteCellRows({ data, level, keyIndex, periodIdx, cells }) {
       <div style={{ marginBottom: 6 }}>
         {usable.map((cell) => {
           const value = cellValue(data, level, keyIndex, periodIdx, cell);
-          const share = cellShare(data, level, keyIndex, periodIdx, cell);
           return (
             <Row key={cell} label={COMMUTE_CELLS[cell].label}>
               {value === null ? "-" : fmt(value)}
-              {Number.isFinite(share) ? ` · ${(100 * share).toFixed(2)}%` : ""}
             </Row>
           );
         })}
         {Number.isFinite(ratio) ? (
-          <Row label="Concentration ratio">{`${ratio.toFixed(2)}×`}</Row>
+          <Row label="AC Transit ÷ all commuters">{`${(100 * ratio).toFixed(1)}%`}</Row>
         ) : null}
       </div>
     </>
@@ -252,18 +252,10 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
   const own = cached.own;
   const street = cached.street;
   const series = routeMode === "own" ? own : street;
-  const eras = own.eras.length ? own.eras : street.eras;
   const currentLoad = series.real[week] + series.imp[week];
   const streetLoad = street.real[week] + street.imp[week];
   const boardings = routeBoardings(data, route, week);
   const isScheduleOnly = (meta.sched_only_routes || []).includes(route);
-  const directionsByEra = {};
-  for (const era of street.eras) directionsByEra[era.era] = era.dirs;
-  const directionText = (directions) =>
-    directions
-      .map((direction) => direction === "0" ? "outbound" : "inbound")
-      .sort()
-      .join(" + ") || "-";
 
   return (
     <>
@@ -318,29 +310,16 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
       />
       {isScheduleOnly ? (
         <p className="hint schedule-warning">
-          This line has no APC coverage, so its load profile is reconstructed and <b>not reliable</b>.
-          Section load is cumulative boardings minus alightings, but the reconstruction spreads
-          alightings by an unordered share vector, so the profile never builds. Use the boardings figure instead.
+          None of this line’s buses had a working passenger counter, so the chart above is estimated
+          from its schedule and from how riders used the stops of the lines it replaced. How full the bus is along the route is <b>not
+          reliable</b> here; the weekly boardings figure is the better guide.
         </p>
       ) : null}
       <p className="hint">
         {routeMode === "own"
-          ? `Sum of onboard load over this route's own ${eras.reduce((sum, era) => sum + era.nsec, 0)} stop-to-stop sections - no apportionment. This is not a headcount: it integrates each rider over every section they ride, so it exceeds boardings by the average trip length shown above.`
-          : "Total load on every line using these streets, this route included. Answers how busy is this corridor, not how busy is this line."} Zero weeks = no geometry in that signup.
+          ? "Riders on board, added up over every stop-to-stop segment of this route. Someone who rides ten segments counts ten times, so this is larger than the number of boardings."
+          : "Riders on board for every line that uses the same streets as this route, this route included. It shows how busy the streets are, not this line alone."}
       </p>
-      <h4>Geometry by signup</h4>
-      {eras.length ? (
-        eras.map((era) => (
-          <div className="row" key={era.era}>
-            <span className="k">{era.era}</span>
-            <span>
-              {era.nsec} section{era.nsec === 1 ? "" : "s"} · {directionText(directionsByEra[era.era] || [])}
-            </span>
-          </div>
-        ))
-      ) : (
-        <p className="hint">No corridor geometry for this route.</p>
-      )}
     </>
   );
 }
@@ -475,7 +454,7 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     return <p className="hint">Loading this level...</p>;
   }
   if (level === "none") {
-    return <p className="hint">Areas hidden. Corridor width and colour show onboard load; hover any corridor for its routes.</p>;
+    return <p className="hint">Streets only. Wider, darker lines carry more riders; hover a street for the routes on it.</p>;
   }
   if (view === "income") {
     const [lo, hi] = incomeDomain(data);
@@ -537,28 +516,29 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
           {bar(SEQ_MAGENTA)}
           {labels("0", `${fmt(cellDomain(data, level, data.commute.meta.periods.indexOf(period), cell))}+`)}
           <p className="hint">
-            {names[0]}: how concentrated commuters are in each place, against the
-            98th percentile of the same measure.{" "}
             {COMMUTE_CELLS[cell].src === "all"
-              ? `LODES ${COMMUTE_CELLS[cell].col === "work" ? "primary jobs by workplace" : "employed residents by home"} tract, ${year} — the snapshot year, clamped to what LEHD has published.`
+              ? `Employed residents living in each tract, Census LODES ${year}.`
               : roundTrip
-                ? `Morning riders whose trip comes back in the evening, so shoppers, students and BART transfers are largely out. Grey: under ${COMMUTE_MIN} riders per weekday.`
-                : `Raw morning ${COMMUTE_CELLS[cell].col === "work" ? "arrivals" : "departures"} — this bundle predates the round-trip scores. Grey: under ${COMMUTE_MIN} riders per weekday.`}{" "}
-            Size still encodes total volume.
+                ? `Estimated AC Transit commuters living in each place on an average weekday: morning riders whose trip is repeated in reverse that evening. Grey: under ${COMMUTE_MIN} riders per weekday.`
+                : `Morning departures on an average weekday. Grey: under ${COMMUTE_MIN} riders per weekday.`}
           </p>
         </>
       );
     }
+    const median = compareMedian(data, level, data.commute.meta.periods.indexOf(period));
+    const percent = (value) => `${(100 * value).toFixed(value < 0.01 ? 2 : 1)}%`;
     return (
       <>
         {bar(DIVERGING)}
-        {labels("¼×", "4×")}
+        <div className="legend-labels">
+          <span>{percent(median / 4)} or less</span>
+          <span>{percent(median)}</span>
+          <span>{percent(median * 4)}+</span>
+        </div>
         <p className="hint">
-          {names[0]} ÷ {names[1]}, each as a share of its own total
-          {commuteCells.some(cellIsTractOnly) ? ` (LODES ${year})` : ""}. 1× = the two
-          agree. Red: more AC Transit than all commuters would imply; blue: more
-          non-AC — often BART-served or car territory. Log₂ scale. Grey: under{" "}
-          {COMMUTE_MIN} riders per weekday, or nothing published to divide by.
+          {names[0]} ÷ {names[1]} living in each tract (LODES {year}). White is the median tract,{" "}
+          {percent(median)}; red tracts have a higher share, blue a lower one. Grey: under {COMMUTE_MIN}{" "}
+          riders per weekday, or no workers to divide by.
         </p>
       </>
     );
@@ -568,7 +548,7 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
       <>
         {bar(SEQ_BLUE)}
         {labels("0", `${fmt(data.domains[level])}+ / wk`)}
-        <p className="hint">Boardings + alightings per week. Circle size also encodes volume.</p>
+        <p className="hint">Boardings plus drop-offs per week. Larger circles mean more riders.</p>
       </>
     );
   }
@@ -671,7 +651,9 @@ function RouteSearch({ data, week, onPick }) {
 }
 
 function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
-  const series = selectionSeries(data, selection);
+  const [tab, setTab] = useState(data.speed ? "speed" : "riders");
+  const series = selectionSeries(data, selection.keys);
+  const speed = regionSpeed(data, selection.bounds);
   const exportPng = () => {
     if (!canvasRef.current) return;
     const link = document.createElement("a");
@@ -682,13 +664,48 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
   return (
     <div id="chartPanel">
       <div className="cp-head">
-        <span id="cpTitle">{selection.length} stop group{selection.length === 1 ? "" : "s"} selected</span>
+        <span id="cpTitle">{selection.keys.length} stop group{selection.keys.length === 1 ? "" : "s"} selected</span>
         <span className="cp-actions">
-          <button className="btn small" type="button" onClick={exportPng}>Export PNG</button>
+          {tab === "riders" ? <button className="btn small" type="button" onClick={exportPng}>Export PNG</button> : null}
           <button className="btn small ghost" type="button" aria-label="Close chart" onClick={onClear}>X</button>
         </span>
       </div>
-      <SelectionChart series={series} meta={data.meta} canvasRef={canvasRef} />
+      {data.speed && selection.bounds ? (
+        <div className="seg">
+          {[["speed", "Riders and bus speed"], ["riders", "Observed vs. estimated"]].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`segbtn${tab === value ? " on" : ""}`}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {tab === "speed" && selection.bounds ? (
+        <>
+          <p className="rs-stat">
+            Average bus speed, 2019–2026:{" "}
+            <b>{speed?.average ? `${speed.average.toFixed(1)} mph` : speed ? "no bus data here" : "loading…"}</b>
+          </p>
+          <RidershipSpeedChart
+            series={series}
+            speed={speed}
+            meta={data.meta}
+            mapChanges={Object.values(data.speed.meta.eras).slice(1).map((era) => era.months[0])}
+          />
+          <p className="hint rs-caption">
+            Each dot is a month: average bus speed on every street inside the box (from the bus counters, including
+            time at stops and lights) against average weekly boardings and drop-offs at the selected stops. Ringed
+            dots are the two months the street map was updated (January 2022, April 2025); part of any jump there
+            comes from that change, not from traffic.
+          </p>
+        </>
+      ) : (
+        <SelectionChart series={series} meta={data.meta} canvasRef={canvasRef} />
+      )}
     </div>
   );
 }
@@ -712,7 +729,7 @@ function statHtml(data, level, keyIndex, week) {
   const imputed = boardImp + alightImp;
   const baseline = totalAt(data, level, keyIndex, data.BASE);
   return `<div class="row"><span class="k">Boardings</span><span>${discloseHtml(boardReal, boardImp)}</span></div>
-    <div class="row"><span class="k">Alightings</span><span>${discloseHtml(alightReal, alightImp)}</span></div>
+    <div class="row"><span class="k">Drop-offs</span><span>${discloseHtml(alightReal, alightImp)}</span></div>
     <div class="row"><span class="k">Ridership</span><span>${discloseHtml(boardReal + alightReal, imputed)}</span></div>
     <div class="row"><span class="k">Imputed</span><span>${total > 0 ? `${(100 * imputed / total).toFixed(1)}%` : "-"}</span></div>
     <div class="row"><span class="k">vs Feb 2020</span><span>${baseline > 0 ? `${(100 * total / baseline).toFixed(0)}%` : "-"}</span></div>
@@ -852,7 +869,9 @@ function renderDataLayer(api, data, options) {
           color = result.color;
         }
       } else {
-        value = totalAt(data, "group", index, week);
+        // Recovery time does not depend on the week, so its dots are sized by
+        // Feb 2020 ridership and stay put while the time bar moves.
+        value = totalAt(data, "group", index, view === "recovery" ? data.BASE : week);
         color = colorFor(data, "group", index, week, view, recThresh);
       }
       const visible = value > 0 && !!(color || edge.color);
@@ -1332,8 +1351,8 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
 function nodeHoverHtml(flow) {
   const arrow = flow.net >= 0 ? "&#9650;" : "&#9660;";
   return `<div style="font-size:12px"><div class="row"><span class="k">${flow.name}</span></div>
-    <div class="row"><span class="k">Boarding / wk</span><span>${discloseHtml(flow.board - flow.boardImp, flow.boardImp)}</span></div>
-    <div class="row"><span class="k">Alighting / wk</span><span>${discloseHtml(flow.alight - flow.alightImp, flow.alightImp)}</span></div>
+    <div class="row"><span class="k">Boardings / wk</span><span>${discloseHtml(flow.board - flow.boardImp, flow.boardImp)}</span></div>
+    <div class="row"><span class="k">Drop-offs / wk</span><span>${discloseHtml(flow.alight - flow.alightImp, flow.alightImp)}</span></div>
     <div class="row"><span class="k">Net at this stop group</span><span>${arrow} ${Math.abs(Math.round(flow.net)).toLocaleString()}</span></div></div>`;
 }
 
@@ -1405,14 +1424,19 @@ function peakLabel(hour) {
    across 2019/2023/2026 while raw arrivals decay. See round_trip() in
    scripts/build_commute_pack.py. */
 
+// Only the home end is offered: where bus commuters live against where all
+// employed residents live. The workplace cells were dropped from the app.
 const COMMUTE_CELLS = {
-  "ac-work": { label: "AC Transit workplaces", col: "work", src: "ac" },
-  "ac-home": { label: "AC Transit homes", col: "home", src: "ac" },
-  "all-work": { label: "All workplaces", col: "work", src: "all" },
-  "all-home": { label: "All homes", col: "home", src: "all" },
+  "ac-home": { label: "AC Transit commuters", col: "home", src: "ac" },
+  "all-home": { label: "All commuters", col: "home", src: "all" },
 };
-const COMMUTE_GRID = [["ac-work", "ac-home"], ["all-work", "all-home"]];
-const COMMUTE_DEFAULT_CELLS = ["ac-work"];
+const COMMUTE_DEFAULT_CELLS = ["ac-home"];
+// The three buttons, each a set of cells: one measure alone, or both compared.
+const COMMUTE_MODES = [
+  ["ac", "AC Transit commuters", ["ac-home"]],
+  ["all", "All commuters", ["all-home"]],
+  ["compare", "Compare", ["ac-home", "all-home"]],
+];
 
 // LODES is published per tract and per year, so those two cells exist only at
 // tract level; the AC cells work at every area level.
@@ -1504,9 +1528,11 @@ function cellDrawable(data, level, key, p, cell) {
   return !!stats && stats.total >= COMMUTE_MIN;
 }
 
-/* One cell: concentration on the magenta ramp, against the 98th percentile of
-   the same measure. Two: the ratio of the two concentrations on the diverging
-   ramp, log2 around parity, so 1x is the midpoint and either end is 4x. */
+/* One cell: that count on the magenta ramp, against the 98th percentile of the
+   same measure. Compare: AC Transit commuters divided by all commuters living
+   in the tract, on the blue-red diverging ramp centred on the median tract --
+   white is the median, red a higher share, blue a lower one -- log2, so either
+   end is 4x or 1/4x the median. */
 function commuteCellColor(data, level, key, p, cells) {
   if (!cells.every((cell) => cellDrawable(data, level, key, p, cell))) return null;
   if (cells.length === 1) {
@@ -1515,18 +1541,36 @@ function commuteCellColor(data, level, key, p, cells) {
     return ramp(SEQ_MAGENTA, seqT(value, cellDomain(data, level, p, cells[0])));
   }
   const ratio = commuteCellRatio(data, level, key, p, cells);
-  return Number.isNaN(ratio) ? null : ramp(DIVERGING, divT(ratio));
+  return Number.isFinite(ratio) ? ramp(DIVERGING, divT(ratio / compareMedian(data, level, p))) : null;
 }
 
-/* AC Transit's concentration over all commuters', never the other way round
-   -- see orderCells. NaN -- grey -- when either side has nothing to take a
-   ratio of. */
+/* AC Transit commuters per all commuters in one tract: the estimated round-trip
+   bus commuters on an average weekday over the LODES employed residents. NaN --
+   grey -- when there are no workers to divide by. */
 function commuteCellRatio(data, level, key, p, cells) {
   if (cells.length !== 2) return NaN;
   const [ac, all] = orderCells(cells);
-  const a = cellShare(data, level, key, p, ac);
-  const b = cellShare(data, level, key, p, all);
-  return !(b > 0) || Number.isNaN(a) ? NaN : a / b;
+  const a = cellValue(data, level, key, p, ac);
+  const b = cellValue(data, level, key, p, all);
+  return a === null || !(b > 0) ? NaN : a / b;
+}
+
+// The median compare ratio over tracts drawn at all, cached per snapshot.
+function compareMedian(data, level, p) {
+  const cache = data.commute.commuteDomains;
+  const cacheKey = `compareMedian|${level}|${p}`;
+  if (cache[cacheKey]) return cache[cacheKey];
+  const cells = ["ac-home", "all-home"];
+  const values = [];
+  const n = level === "tract" ? data.meta.tracts.length : 0;
+  for (let key = 0; key < n; key += 1) {
+    if (!cells.every((cell) => cellDrawable(data, level, key, p, cell))) continue;
+    const ratio = commuteCellRatio(data, level, key, p, cells);
+    if (ratio > 0) values.push(ratio);
+  }
+  values.sort((a, b) => a - b);
+  cache[cacheKey] = values.length ? values[Math.floor(values.length / 2)] : 1;
+  return cache[cacheKey];
 }
 
 function commuteValue(data, level, key, cells, p) {
@@ -1578,20 +1622,19 @@ function lodesYear(data, p) {
 function commuteTipHtml(data, level, keyIndex, name, p, cells) {
   const rows = cells.map((cell) => {
     const value = cellValue(data, level, keyIndex, p, cell);
-    const share = cellShare(data, level, keyIndex, p, cell);
     const label = COMMUTE_CELLS[cell].src === "all"
       ? `${COMMUTE_CELLS[cell].label} (${lodesYear(data, p)})`
       : COMMUTE_CELLS[cell].label;
     return `<div class="row"><span class="k">${escapeHtml(label)}</span><span>${
       value === null ? "-" : fmt(value)
-    }${Number.isFinite(share) ? ` · ${(100 * share).toFixed(2)}%` : ""}</span></div>`;
+    }</span></div>`;
   }).join("");
   const ratio = commuteCellRatio(data, level, keyIndex, p, cells);
   const stats = commuteStats(data.commute, level, keyIndex, p);
   return `<div style="font-size:12px"><b>${escapeHtml(name)}</b>
     ${rows}
     ${Number.isFinite(ratio)
-      ? `<div class="row"><span class="k">Concentration ratio</span><span>${ratio.toFixed(2)}×</span></div>`
+      ? `<div class="row"><span class="k">AC Transit ÷ all commuters</span><span>${(100 * ratio).toFixed(1)}%</span></div>`
       : ""}
     ${stats
       ? `<div class="row"><span class="k">All riders / weekday</span><span>${fmt(stats.total)}</span></div>`
@@ -1614,7 +1657,7 @@ function CommutePanel({ data, commute, level, keyIndex, p }) {
       <h4>Weekday profile · {period.label}</h4>
       <HourlyChart now={now} base={base} windows={commute.meta.windows} />
       <p className="hint">
-        Boardings above the line, alightings below, average weekday. Grey outline: {commute.meta.base_label ?? "Feb 2020"}.
+        Boardings above the line, drop-offs below, average weekday. Grey outline: {commute.meta.base_label ?? "Feb 2020"}.
       </p>
       <div style={{ marginBottom: 6 }}>
         <Row label="Riders / weekday">{fmt(stats.total)}</Row>
@@ -1644,7 +1687,9 @@ function renderMapLayers(api, data, options) {
   // tracts, block groups and cities they bury the areas, so there only an
   // opened route's own corridors are drawn, to keep it findable.
   const selectedRoute = detail?.lv === "route" ? detail.key : null;
-  const corridorLevel = level === "group" || level === "none";
+  // Recovery time on stop groups leaves them out too: it is a per-place map
+  // that does not follow the time bar, and the corridors would.
+  const corridorLevel = (level === "group" && view !== "recovery") || level === "none";
   const era = eraForWeek(data, week);
   if (!era || !data.corridors[era] || (!corridorLevel && !selectedRoute)) {
     routeCanvas?.setOptions({ visible: false });
@@ -1674,6 +1719,63 @@ function renderMapLayers(api, data, options) {
   });
 }
 
+/* One plain paragraph per view, shown under the option while it is selected:
+   what the colours and sizes are, where the numbers come from, nothing more. */
+const VIEW_DESCRIPTIONS = {
+  total: "How many times people got on or off an AC Transit bus at each place during the selected week. Larger, darker circles and areas mean more riders.",
+  rel: "Riders at each place in the selected week as a share of the week of Feb. 3, 2020. 100% means the same number of boardings and drop-offs as that week; green is above it and red below.",
+  recovery: "The first month in which each place's ridership held the chosen share of its February 2020 level for three months in a row. It does not change with the time bar.",
+  commute: "Where commuters live. AC Transit commuters is an estimate from the bus counters: a morning trip counts only when the same trip is made in reverse that evening. All commuters is the Census Bureau's count of employed residents. Compare divides the first by the second for each Census tract.",
+  speed: "The average speed of buses on each street, in miles per hour, from the times their doors opened at one stop and the next. It includes time spent at stops and traffic lights.",
+  los: "How often a bus comes on each street, counting every route that uses it: the average number of minutes between buses in one direction during the chosen time of day.",
+  imp: "The share of each place's count that is estimated rather than measured. Estimates fill in for buses without working passenger counters, and for new routes after the August 2025 service changes.",
+};
+
+const ABOUT_SEEN_KEY = "acpra-about-seen";
+
+function AboutModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (event) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="about-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="about-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="aboutTitle"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="aboutTitle">About this data</h2>
+        <p>
+          These maps show AC Transit bus ridership from January 2019 to May 2026. The counts come from
+          automatic passenger counters: sensors at bus doors that record how many people get on and off at
+          each stop.
+        </p>
+        <p>
+          Not every bus had a working counter, especially before 2021. Where a route’s counters were missing
+          or unreliable for a month, its riders were estimated from AC Transit’s route totals, and all counts
+          were adjusted to match the ridership AC Transit reports to the federal National Transit Database.
+        </p>
+        <p>
+          Numbers on the map read as a total followed by the estimated part in gold: <b>1,200</b>{" "}
+          <span className="gold">(300)</span> means 1,200 riders, 300 of them estimated.
+        </p>
+        <p>
+          Trips between places, commute patterns, speeds and bus frequency are all calculated from these
+          counts. They are estimates, not records of individual trips.
+        </p>
+        <div className="about-actions">
+          <a className="about-link" href="/story">Read the story →</a>
+          <button className="btn" type="button" onClick={onClose}>Explore the map</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RidershipExplorer() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1685,6 +1787,23 @@ export default function RidershipExplorer() {
   const [servicePeriod, setServicePeriod] = useState(0);
   // Bumped whenever on-demand data lands, so the map and panels redraw.
   const [loadTick, setLoadTick] = useState(0);
+  // The methodology note opens on a first visit and from the sidebar after.
+  const [aboutOpen, setAboutOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (!window.localStorage.getItem(ABOUT_SEEN_KEY)) setAboutOpen(true);
+    } catch {
+      setAboutOpen(true);
+    }
+  }, []);
+  const closeAbout = () => {
+    setAboutOpen(false);
+    try {
+      window.localStorage.setItem(ABOUT_SEEN_KEY, "1");
+    } catch {
+      // Private windows can refuse storage; the note just shows again next time.
+    }
+  };
   const [playing, setPlaying] = useState(false);
   const [detail, setDetail] = useState(null);
   const [selection, setSelection] = useState(null);
@@ -1755,6 +1874,7 @@ export default function RidershipExplorer() {
     serviceMonth: data.service && (isServiceView(view) || detail?.lv === "route")
       ? serviceSnapshot(data, week) : null,
     commute: view === "commute" || !!detail,
+    speed: !!selection,
   } : null;
   const needsKey = needs ? JSON.stringify({ ...needs, serviceMonth: needs.serviceMonth?.id }) : "";
   const loadingData = !!needs && isPending(data, needs);
@@ -1913,12 +2033,16 @@ export default function RidershipExplorer() {
         setContextMenu(null);
         setRegionChooser({
           keys: picked,
+          bounds: { north: northWest.lat, south: southEast.lat, west: northWest.lng, east: southEast.lng },
           x: point ? Math.max(8, Math.min(point.x, (wrap?.width || 800) - 260)) : 20,
           y: point ? Math.max(8, Math.min(point.y, (wrap?.height || 600) - 170)) : 20,
         });
         return;
       }
-      setSelection(picked);
+      setSelection({
+        keys: picked,
+        bounds: { north: northWest.lat, south: southEast.lat, west: northWest.lng, east: southEast.lng },
+      });
       setDetail(null);
       setContextMenu(null);
     },
@@ -2119,32 +2243,34 @@ export default function RidershipExplorer() {
       <div id="app">
         <aside id="sidebar">
           <h1>AC Transit Ridership</h1>
-          <p className="sub">Weekly boardings + alightings, 2019-2026</p>
+          <p className="sub">Weekly boardings and drop-offs, 2019–2026</p>
 
           <section>
             <h2>View</h2>
             {[
               ["total", "Total ridership"],
               ["rel", "Relative to Feb 2020"],
-              ["imp", "Percent imputed"],
               ["recovery", "Recovery time"],
-              ...(data?.meta?.income ? [["income", "Median income"]] : []),
               ...(data?.commute ? [["commute", "Commute pattern"]] : []),
               ...(data?.service ? [["speed", "Speed per corridor"], ["los", "Level of service"]] : []),
+              ["imp", "Percent imputed"],
             ].map(([value, label]) => (
-              <label key={value}>
-                <input
-                  type="radio"
-                  name="view"
-                  value={value}
-                  checked={view === value}
-                  onChange={(event) => {
-                    setView(event.target.value);
-                    if (event.target.value !== "commute") setCommuteFocus(null);
-                  }}
-                />
-                {label}
-              </label>
+              <div key={value}>
+                <label>
+                  <input
+                    type="radio"
+                    name="view"
+                    value={value}
+                    checked={view === value}
+                    onChange={(event) => {
+                      setView(event.target.value);
+                      if (event.target.value !== "commute") setCommuteFocus(null);
+                    }}
+                  />
+                  {label}
+                </label>
+                {view === value ? <p className="view-desc">{VIEW_DESCRIPTIONS[value]}</p> : null}
+              </div>
             ))}
             {view === "recovery" ? (
               <div id="recCtl">
@@ -2157,7 +2283,6 @@ export default function RidershipExplorer() {
                   </select>
                   of Feb 2020
                 </label>
-                <p className="hint">Colour = when the area first held that level for three straight months. Independent of the time bar.</p>
               </div>
             ) : null}
             {isServiceView(view) && data?.service ? (
@@ -2175,10 +2300,7 @@ export default function RidershipExplorer() {
                     </button>
                   ))}
                 </div>
-                <p className="hint">
-                  Corridors coloured by {view === "los" ? "headway" : "speed"} measured by the bus counters. Hover a
-                  corridor for every period; open a route for its own table.
-                </p>
+                <p className="hint">Hover a street for every time of day, or open a route for its own table.</p>
               </div>
             ) : null}
             {view === "commute" && data?.commute ? (
@@ -2218,50 +2340,36 @@ export default function RidershipExplorer() {
                     </p>
                   </>
                 ) : (
-                  <div className="cellgrid">
-                    {COMMUTE_GRID.map((row, rowIndex) => (
-                      <div className="cellrow" key={rowIndex}>
-                        {row.map((cell) => {
-                          const disabled = cellIsTractOnly(cell) && !data.lodes;
-                          const on = commuteCells.includes(cell);
-                          return (
-                            <button
-                              key={cell}
-                              type="button"
-                              className={`cellbtn${on ? " on" : ""}`}
-                              disabled={disabled}
-                              aria-pressed={on}
-                              onClick={() => setCommuteCells(
-                                (current) => toggleCommuteCell(current, cell),
-                              )}
-                            >
-                              {COMMUTE_CELLS[cell].label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))}
+                  <div className="seg seg-wrap">
+                    {COMMUTE_MODES.map(([mode, label, cells]) => {
+                      const disabled = cells.some(cellIsTractOnly) && !data.lodes;
+                      const on = cells.length === commuteCells.length && cells.every((cell) => commuteCells.includes(cell));
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`segbtn${on ? " on" : ""}`}
+                          disabled={disabled}
+                          aria-pressed={on}
+                          onClick={() => setCommuteCells(cells)}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 {!commuteFocus ? (
                   <p className="hint">
                     {commuteCells.length === 1
-                      ? "Showing one measure's concentration. Pick the cell above or below it to compare the two."
-                      : `Comparing ${COMMUTE_CELLS[commuteCells[0]].label} against ${COMMUTE_CELLS[commuteCells[1]].label}.`}
-                    {data.lodes ? "" : " All workplaces and All homes need lodes.json, which this bundle does not carry — run scripts/build_lodes_pack.py and sync the pack."}
+                      ? `${COMMUTE_CELLS[commuteCells[0]].label} living in each place.`
+                      : "AC Transit commuters divided by all commuters living in each Census tract."}
+                    {data.lodes ? "" : " All commuters needs lodes.json, which this data bundle does not include."}
                   </p>
                 ) : null}
                 <p className="hint">
-                  Showing the {data.commute.meta.periods[commutePeriodIdx].label} average weekday
-                  ({data.commute.meta.periods[commutePeriodIdx].weekdays} weekdays, APC-corrected) —
-                  the snapshot follows the time bar, so scrub it to compare pre- and post-pandemic
-                  patterns.{" "}
-                  {Math.round((1 - data.commute.meta.periods[commutePeriodIdx].reliable) * 100)}% of
-                  volume is imputed
-                  {data.commute.meta.periods[commutePeriodIdx].odCoverage < 0.99
-                    ? `; inferred flows cover ${Math.round(data.commute.meta.periods[commutePeriodIdx].odCoverage * 100)}% of ridership`
-                    : ""}
-                  .
+                  {data.commute.meta.periods[commutePeriodIdx].label}, average weekday. Click a place to
+                  see estimated morning trips to or from it.
                 </p>
               </div>
             ) : null}
@@ -2274,7 +2382,7 @@ export default function RidershipExplorer() {
               ["bgroup", "Block groups"],
               ["tract", "Census tracts"],
               ...(data?.cities ? [["city", "Cities"]] : []),
-              ["none", "None (routes only)"],
+              ["none", "Corridors"],
             ].map(([value, label]) => (
               <label key={value} style={levelLocked(value) ? { opacity: 0.55 } : undefined}>
                 <input
@@ -2294,13 +2402,8 @@ export default function RidershipExplorer() {
               </label>
             ))}
             {commuteLocksTract ? (
-              <p className="hint">All workplaces and All homes are tract-level: LODES is published per tract.</p>
+              <p className="hint">All commuters is published only for Census tracts.</p>
             ) : null}
-            {serviceLocksCorridors ? (
-              <p className="hint">Speed and level of service are drawn on the corridors, shown with stop groups or routes only.</p>
-            ) : (
-              <p className="hint">Corridors show with stop groups and routes only; line width is onboard load. Click a corridor to pick a line.</p>
-            )}
           </section>
 
           <section id="legendBox">
@@ -2327,14 +2430,16 @@ export default function RidershipExplorer() {
 
           <section>
             <h2>Selection</h2>
-            <p className="hint">Click any stop group or area for details. Shift-drag to chart a whole region.</p>
+            <p className="hint">
+              Click a stop, an area or a street to see its numbers. To chart several places together, hold
+              Shift and drag a box across the map.
+            </p>
             <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>Clear selection</button>
           </section>
 
-          <p className="disclosure">
-            Every figure reads <b>Real+Imputed</b> <span className="gold">(Imputed)</span>.
-            Imputed covers APC route-months failing the reliability gate - including the May-Jul 2019 fleet collapse - and post-Realign labels reconstructed from schedule + predecessor stop shares.
-          </p>
+          <button className="btn about-btn" type="button" onClick={() => setAboutOpen(true)}>
+            About this data
+          </button>
         </aside>
 
         <main id="mapWrap" ref={mapWrapRef}>
@@ -2364,7 +2469,7 @@ export default function RidershipExplorer() {
                 className="ctx-item"
                 type="button"
                 onClick={() => {
-                  setSelection(regionChooser.keys);
+                  setSelection({ keys: regionChooser.keys, bounds: regionChooser.bounds });
                   setDetail(null);
                   setRegionChooser(null);
                 }}
@@ -2419,6 +2524,7 @@ export default function RidershipExplorer() {
           </div>
         </footer>
       </div>
+      {aboutOpen ? <AboutModal onClose={closeAbout} /> : null}
       {loading ? <div id="loading">Loading ridership data...</div> : null}
       {!loading && loadingData ? <div className="loading-chip">Loading data for this view...</div> : null}
       {error ? (

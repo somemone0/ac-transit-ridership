@@ -103,20 +103,25 @@ export const MAP_ONE = [
     ],
   },
   {
-    scene: { mask: false, bounds: "eastBay", series: "system" },
+    // From here the city bars use the past year against the year before the
+    // pandemic, the basis this passage quotes.
+    scene: { mask: false, bounds: "eastBay", series: "system", compare: "year" },
     text: [
-      "Berkeley fared better than the rest of the East Bay, much of which still hasn’t recovered. Much of Alameda, East Oakland, and Transbay service to San Francisco has never seen bus service return to 80% of February 2020’s level.",
+      "Over the past year, Berkeley’s bus stops saw 88% as many riders as in the year before the pandemic. That is ahead of Oakland at 84%, Richmond at 74% and Alameda at 64%, though Berkeley’s smaller neighbors Albany and Emeryville have come back further, to 100% and 93%. Much of Alameda, East Oakland, and Transbay service to San Francisco has never seen bus service return to 80% of February 2020’s level.",
     ],
   },
   {
-    scene: { callout: "tempo" },
+    scene: { callout: "tempo", trace: ["1T", "1"] },
     text: [
-      "The Tempo bus rapid transit system, completed during the pandemic, lead to an increase in local ridership.",
+      "The Tempo bus rapid transit line on International Boulevard, the 1T highlighted here, was completed during the pandemic and led to an increase in local ridership.",
     ],
   },
   {
     scene: { callout: "transbay" },
-    text: ["Transbay service has remained at around 30% of pre-pandemic levels."],
+    text: [
+      "AC Transit’s Transbay buses, which cross the Bay Bridge to the Salesforce Transit Center in San Francisco, carried 48% as many riders over the past year as in the year before the pandemic.",
+      "The all-day lines have come back: the F carries slightly more riders than before, and the NL about three-quarters as many. Most weekday rush-hour lines, such as the J, P and V, carry a quarter to a third of their former riders, and nine lines have not run since March 2020.",
+    ],
   },
 ];
 
@@ -132,12 +137,15 @@ export const MAP_TWO = [
       focus: { region: "campus", mode: "from" },
     },
     text: [
-      "Inferred from Here will show estimated trips from that stop for the month the time slider is on.",
+      "Bus counters record how many people get on and off at each stop, not where each person rides. Using the method above, this map estimates where riders who board at stops around the UC Berkeley campus on a weekday morning get off. Greener dots mean more estimated riders.",
+      "In the interactive app, the same map is the “Inferred from here” option: choose the Commute pattern view and click any stop or area.",
     ],
   },
   {
     scene: { focus: { region: "campus", mode: "to" } },
-    text: ["Inferred to Here will show estimated trips from that stop for that month."],
+    text: [
+      "Reversed, the map estimates where riders arriving at campus stops in the morning got on. In the app, this is “Inferred to here.”",
+    ],
   },
   {
     scene: { marks: ["rockridge", "ucVillage"] },
@@ -158,14 +166,14 @@ export const RECOVERY_SCENE = {
 };
 
 // Fold each step's scene over the ones before it and turn names into indexes.
-// Callouts and marks point at what one passage is talking about, so they
-// belong to that step alone and are not carried forward.
+// Callouts, marks and traced lines point at what one passage is talking about,
+// so they belong to that step alone and are not carried forward.
 export function resolveScenes(steps, data, places) {
   let current = { focus: null, recThresh: RECOVERY_THRESHOLD };
   return steps.map((step) => {
-    const { callout = null, marks = [], ...inherited } = step.scene || {};
+    const { callout = null, marks = [], trace = null, ...inherited } = step.scene || {};
     current = { ...current, ...inherited };
-    return resolveScene({ ...current, callout, marks }, data, places);
+    return resolveScene({ ...current, callout, marks, trace }, data, places);
   });
 }
 

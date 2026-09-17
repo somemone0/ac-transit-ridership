@@ -147,6 +147,13 @@ export function prepareStory(data) {
 // about a stop, block groups where the stop groups changed underneath it --
 // Tempo's median stations are new stop groups with no 2020 baseline, so only
 // the areas around International Blvd can show its growth.
+// Every AC Transit Transbay line in the data, including the ones that have not
+// run since 2020, so the year-over-year share counts what was lost.
+const TRANSBAY_ROUTES = [
+  "B", "C", "CB", "E", "F", "FS", "G", "H", "J", "L", "LA", "LC", "M", "NL", "NX", "NX1", "NX2",
+  "NX3", "NX4", "NXC", "O", "OX", "P", "S", "SB", "U", "V", "W", "Z",
+];
+
 export function resolvePlaces(data) {
   const groups = data.meta.stop_groups;
   const named = (pattern) => {
@@ -168,9 +175,12 @@ export function resolvePlaces(data) {
       label: "International Blvd.",
       lat: 37.75911, lon: -122.18647, level: "bgroup", keys: areasOf(named(/International Blvd/)),
     },
+    // The Transbay lines as a whole, reported as their past year against the
+    // year before the pandemic (routesYearShare), not the terminal's one week.
     transbay: {
-      label: "Salesforce Transit Center",
-      lat: 37.78976, lon: -122.39606, level: "group", keys: named(/^Salesforce Transit Center/),
+      label: "Transbay lines",
+      lat: 37.78976, lon: -122.39606,
+      routes: TRANSBAY_ROUTES.filter((route) => data.routeW.ix.has(route)),
     },
     rockridge: { label: "Rockridge BART", lat: 37.84469, lon: -122.25186 },
     ucVillage: { label: "UC Village", lat: 37.88428, lon: -122.29889 },

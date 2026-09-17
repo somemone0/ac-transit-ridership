@@ -20,6 +20,7 @@ import {
   loadCommuteOD,
   ramp,
   recoveryAt,
+  routeBoardings,
   sectionLoad,
   totalAt,
 } from "../ridership-data";
@@ -33,6 +34,7 @@ const EDGE = "#fcfcfb";
 const NO_DATA = "#e8e7e2";
 const MEMBER_EDGE = "#419c62";
 const FADE_MS = 220;
+const TRACE = "#9ec5f4";
 
 const AP_MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
 const FULL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -82,6 +84,54 @@ function campusFlows(data, prep, period, onLoaded) {
   return null;
 }
 
+/* Boardings on a set of routes over the latest 52 weeks, as a share of the 52
+   weeks before March 2020. A year against a year, so seasons and school
+   breaks cancel out. */
+export function routesYearShare(data, routes) {
+  const { weeks } = data.meta;
+  const pre = weeks.findIndex((label) => label >= "2020-03-01");
+  if (pre < 52) return NaN;
+  let before = 0;
+  let after = 0;
+  for (const route of routes) {
+    for (let week = pre - 52; week < pre; week += 1) {
+      const value = routeBoardings(data, route, week);
+      if (value) before += value.real + value.imp;
+    }
+    for (let week = data.W - 52; week < data.W; week += 1) {
+      const value = routeBoardings(data, route, week);
+      if (value) after += value.real + value.imp;
+    }
+  }
+  return before > 0 ? after / before : NaN;
+}
+
+// Riders at a city over the four weeks starting at `week`, against the four
+// weeks starting at the Feb 2020 baseline week: steadier than one week against
+// one, and exactly 100% at the baseline itself.
+function cityShare(data, city, week) {
+  const from = Math.min(week, data.W - 4);
+  let now = 0;
+  for (let w = from; w < from + 4; w += 1) now += totalAt(data, "city", city, w);
+  now /= 4;
+  let base = 0;
+  for (let w = data.BASE; w < data.BASE + 4; w += 1) base += totalAt(data, "city", city, w);
+  base /= 4;
+  return base > 0 ? now / base : NaN;
+}
+
+// The latest 52 weeks of data against the 52 weeks before March 2020, the
+// basis the story's city figures are quoted on.
+function cityYearShare(data, city) {
+  const pre = data.meta.weeks.findIndex((label) => label >= "2020-03-01");
+  if (pre < 52) return NaN;
+  let before = 0;
+  let after = 0;
+  for (let w = pre - 52; w < pre; w += 1) before += totalAt(data, "city", city, w);
+  for (let w = data.W - 52; w < data.W; w += 1) after += totalAt(data, "city", city, w);
+  return before > 0 ? after / before : NaN;
+}
+
 export function relativeFor(data, level, keys, week) {
   let now = 0;
   let base = 0;
@@ -110,7 +160,9 @@ function fitPadding(width, height, layout) {
 function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud }) {
   const context = canvas.getContext("2d");
   const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  const alpha = { dots: 0, areas: 0, routes: 0, outside: 1, mask: 0 };
+  const alpha = { dots: 0, areas: 0, routes: 0, outside: 1, mask: 0, trace: 0 };
+  // The routes a step traces stay set while the trace fades out.
+  let traceRoutes = null;
   const target = { ...alpha };
   let scene = null;
   let week = 0;
@@ -128,6 +180,8 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
     target.routes = scene.routes ? 1 : 0;
     target.outside = scene.mask ? 0 : 1;
     target.mask = scene.mask ? 1 : 0;
+    target.trace = scene.trace ? 1 : 0;
+    if (scene.trace) traceRoutes = new Set(scene.trace);
   };
 
   const fly = (animate) => {
@@ -306,6 +360,37 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
       }
     }
 
+    // A traced line: the step names routes (the 1T, and the 1 it replaced),
+    // and their corridors draw on top in the accent colour, over areas or
+    // corridors alike.
+    if (alpha.trace > 0.01 && traceRoutes && era && prep.corridors[era]) {
+      const features = data.corridors[era];
+      const geometry = prep.corridors[era];
+      for (const [region, regionAlpha] of regions) {
+        inRegion(region, () => {
+          context.lineCap = "round";
+          context.lineJoin = "round";
+          for (let index = 0; index < features.length; index += 1) {
+            if (!features[index].r.some((rd) => traceRoutes.has(rd.split("|")[0]))) continue;
+            if (!onScreen(geometry[index].bounds, 20)) continue;
+            context.beginPath();
+            tracePath(context, geometry[index].pts);
+            // A dark casing under a light core reads over both the red and the
+            // green ends of the recovery ramp.
+            context.globalAlpha = 0.9 * regionAlpha * alpha.trace;
+            context.strokeStyle = "#0b0b0b";
+            context.lineWidth = 8;
+            context.stroke();
+            context.globalAlpha = regionAlpha * alpha.trace;
+            context.strokeStyle = TRACE;
+            context.lineWidth = 4.5;
+            context.stroke();
+          }
+        });
+      }
+      context.globalAlpha = 1;
+    }
+
     if (alpha.dots > 0.01) {
       const groups = data.meta.stop_groups;
       const commute = scene.view === "commute" ? data.commute : null;
@@ -444,8 +529,14 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
         parts.push(`<circle cx="${start[0]}" cy="${start[1]}" r="2.5" class="leader-end" />`);
       }
       ring(x, y);
-      const share = relativeFor(data, place.level, place.keys, week);
-      const figure = Number.isFinite(share) ? `${Math.round(share * 100)}% of Feb. 2020` : "";
+      let figure = "";
+      if (place.routes) {
+        const share = routesYearShare(data, place.routes);
+        if (Number.isFinite(share)) figure = `${Math.round(share * 100)}% of pre-pandemic riders`;
+      } else {
+        const share = relativeFor(data, place.level, place.keys, week);
+        if (Number.isFinite(share)) figure = `${Math.round(share * 100)}% of Feb. 2020`;
+      }
       label(x, y, figure ? [place.label, figure] : [place.label], start && start[0] > x);
       parts.push("</g>");
     }
@@ -679,12 +770,84 @@ function Hud({ data, scene, week }) {
         <b>{Number.isFinite(share) ? `${Math.round(share * 100)}%` : "–"}</b> of Feb. 2020
       </p>
       <Ramp colors={DIVERGING_RG} labels={["0%", "100%", "200%"]} />
-      <p className="story-hud-note subtle">
-        {scene.level === "group"
-          ? "Each dot is a stop; size shows riders per week. Colour compares the week to Feb. 2020."
-          : "Block groups coloured by ridership compared with Feb. 2020."}
-      </p>
+      {scene.level === "group" ? <DotScale data={data} /> : null}
+      <CityComparison data={data} week={week} basis={scene.compare} />
     </>
+  );
+}
+
+/* What a dot's size means, drawn with the map's own radius rule. */
+function DotScale({ data }) {
+  const domain = data.domains.group;
+  const nice = (value) => {
+    const magnitude = 10 ** Math.floor(Math.log10(value));
+    return Math.round(value / magnitude) * magnitude;
+  };
+  const values = [nice(domain / 10), nice(domain / 2), nice(domain)];
+  const radius = (value) => Math.min(MAX_DOT_R, 2.5 + Math.sqrt(value / domain) * 11);
+  const height = MAX_DOT_R * 2 + 4;
+  let x = 0;
+  const dots = values.map((value) => {
+    const r = radius(value);
+    const cx = x + r;
+    x += r * 2 + 34;
+    return { value, r, cx };
+  });
+  return (
+    <div className="story-dotscale">
+      <svg width={x} height={height + 14} role="img" aria-label="Dot size scale">
+        {dots.map((dot) => (
+          <g key={dot.value}>
+            <circle cx={dot.cx + 1} cy={height - dot.r - 1} r={dot.r} className="dot" />
+            <text x={dot.cx + 1} y={height + 11} textAnchor="middle">{fmt(dot.value)}</text>
+          </g>
+        ))}
+      </svg>
+      <span className="story-dotscale-unit">riders per week</span>
+    </div>
+  );
+}
+
+// Berkeley beside its neighbours and Oakland, so the reader can see where it
+// stands rather than take it on trust.
+const COMPARE_CITIES = ["Berkeley", "Albany", "Emeryville", "El Cerrito", "Oakland", "Richmond", "Alameda"];
+
+function CityComparison({ data, week, basis }) {
+  if (!data.cities) return null;
+  const year = basis === "year";
+  const rows = COMPARE_CITIES
+    .map((name) => {
+      const city = data.cities.places.findIndex((place) => place.name === name);
+      if (city < 0) return null;
+      return { name, share: year ? cityYearShare(data, city) : cityShare(data, city, week) };
+    })
+    .filter((row) => row && Number.isFinite(row.share))
+    .sort((a, b) => b.share - a.share);
+  const max = 1.5;
+  return (
+    <div className="story-cities">
+      <div className="story-cities-title">
+        {year
+          ? `By city: ${apMonth(data.meta.weeks[data.W - 52])}–${apMonth(data.meta.weeks[data.W - 1])} vs. the year before the pandemic`
+          : "By city: four weeks from this date vs. February 2020"}
+      </div>
+      {rows.map((row) => (
+        <div className={`story-city${row.name === "Berkeley" ? " focus" : ""}`} key={row.name}>
+          <span className="story-city-name">{row.name}</span>
+          <span className="story-city-bar">
+            <span
+              className="fill"
+              style={{
+                width: `${(Math.min(max, row.share) / max) * 100}%`,
+                background: ramp(DIVERGING_RG, row.share / 2),
+              }}
+            />
+            <span className="par" style={{ left: `${(1 / max) * 100}%` }} />
+          </span>
+          <span className="story-city-value">{Math.round(row.share * 100)}%</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

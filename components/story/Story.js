@@ -148,7 +148,7 @@ function CampusChart({ data }) {
         {series ? <SelectionChart series={series} meta={data.meta} /> : <div className="story-chart-loading">Loading…</div>}
       </div>
       <figcaption>
-        Weekly boardings and alightings at the {prep ? prep.campusKeys.length : ""} stop groups around the UC Berkeley
+        Weekly boardings and drop-offs at the {prep ? prep.campusKeys.length : ""} stop groups around the UC Berkeley
         campus, January 2019 through May 2026. Blue: observed by automatic people counters. Gold: estimated.
       </figcaption>
     </figure>
@@ -227,6 +227,25 @@ export default function Story() {
         first="70vh"
         label="Map of inferred morning bus trips to and from UC Berkeley"
       />
+
+      <div className="story-body">
+        <h2>Where bus commuters live</h2>
+        <p>
+          The same counts can estimate where AC Transit’s commuters live. A morning bus trip is counted as a
+          commute only when the same trip is made in reverse that evening, which leaves out many errands and
+          one-way trips.
+        </p>
+        <p>
+          In February 2026, about half of these commuters, 49%, lived in Oakland, and 15% lived in Berkeley.
+          Those two cities are home to 23% and 5% of all employed residents in the area AC Transit serves,
+          according to the Census Bureau’s 2023 employment data, the latest available. Bus commuters are far
+          less common in southern Alameda County: Fremont is home to 13% of the area’s workers but about 2% of
+          its bus commuters. The pattern was much the same in 2019.
+        </p>
+        <p>
+          In the app, the Commute pattern view maps both measures and can compare them place by place.
+        </p>
+      </div>
 
       <div className="story-body">
         <h2>Recovery Time</h2>

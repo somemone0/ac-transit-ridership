@@ -231,7 +231,7 @@ function drawSelection(canvas, series, meta) {
   context.font = "600 12px ui-sans-serif,system-ui";
   context.textAlign = "left";
   context.textBaseline = "top";
-  context.fillText("Weekly boardings + alightings", left, 2);
+  context.fillText("Weekly boardings and drop-offs", left, 2);
 }
 
 export function SeriesChart({ series, meta }) {

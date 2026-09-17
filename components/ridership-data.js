@@ -184,6 +184,9 @@ export async function loadVisualizationData() {
       optionalJson("commute_meta.json"),
       optionalJson("lodes.json"),
     ]);
+  // Monthly all-day bus speed per corridor (scripts/build_speed_pack.py);
+  // its binaries load only when a selection charts speed.
+  const speedMeta = await optionalJson("speed_meta.json");
 
   const data = {
     meta,
@@ -213,6 +216,7 @@ export async function loadVisualizationData() {
     incomeDom: null,
     monthIndex: meta.weeks.map((week) => meta.months.indexOf(week.slice(0, 7))),
     service: serviceMeta,
+    speed: speedMeta ? { meta: speedMeta, eras: {} } : null,
     commute: commuteMeta ? commuteShell(commuteMeta) : null,
     lodes,
     cities: null,
@@ -263,6 +267,12 @@ export async function ensureData(data, needs) {
     once(`service:${needs.serviceMonth.id}`, () => loadServiceMonth(data, needs.serviceMonth));
   }
   if (needs.commute && data.commute) once("commute", () => loadCommuteBinaries(data.commute));
+  if (needs.speed && data.speed) {
+    for (const era of Object.keys(data.speed.meta.eras)) {
+      once(`era:${era}`, () => loadEra(data, era));
+      once(`speed:${era}`, () => loadSpeedEra(data, era));
+    }
+  }
   if (!jobs.length) return false;
   jobs.forEach((job) => job.then(() => { job.settled = true; }, () => {}));
   await Promise.all(jobs);
@@ -275,6 +285,9 @@ export function isPending(data, needs) {
     ...(needs.eras || []).filter(Boolean).map((e) => `era:${e}`),
     ...(needs.serviceMonth ? [`service:${needs.serviceMonth.id}`] : []),
     ...(needs.commute && data.commute ? ["commute"] : []),
+    ...(needs.speed && data.speed
+      ? Object.keys(data.speed.meta.eras).flatMap((era) => [`era:${era}`, `speed:${era}`])
+      : []),
   ];
   return keys.some((key) => !data.pending.get(key)?.settled);
 }
@@ -317,6 +330,62 @@ async function loadEra(data, era) {
   data.corridorNodes[era] = nodes;
   // Set last: data.corridors[era] is what readers test for.
   data.corridors[era] = corridors;
+}
+
+async function loadSpeedEra(data, era) {
+  const spec = data.speed.meta.eras[era];
+  data.speed.eras[era] = { ...spec, q: await getBinary(spec.file, Uint16Array) };
+}
+
+/* Monthly all-day bus speed inside a lat/lon box: every corridor piece with a
+   point in the box, combined as distance over time -- sum(weight) /
+   sum(weight / mph), the weight being bus-km -- so a busy street counts for
+   more than a quiet one. Returns per month { month, mph } in meta.months
+   order (mph null where no bus data), and the whole period's average on the
+   same basis. Null until every era's corridors and speeds have loaded. */
+export function regionSpeed(data, bounds) {
+  if (!data.speed || !bounds) return null;
+  const eras = Object.keys(data.speed.meta.eras);
+  if (!eras.every((era) => data.speed.eras[era] && data.corridors[era])) return null;
+  const cacheKey = [bounds.south, bounds.west, bounds.north, bounds.east].join(",");
+  data.speed.cache = data.speed.cache || new Map();
+  if (data.speed.cache.has(cacheKey)) return data.speed.cache.get(cacheKey);
+  const inBox = ([lat, lon]) => lat >= bounds.south && lat <= bounds.north
+    && lon >= bounds.west && lon <= bounds.east;
+  const byMonth = new Map();
+  let totalWeight = 0;
+  let totalTime = 0;
+  const none = data.speed.meta.null;
+  for (const era of eras) {
+    const spec = data.speed.eras[era];
+    const nMonths = spec.months.length;
+    const pieces = [];
+    data.corridors[era].forEach((feature, index) => {
+      if (feature.c.some(inBox)) pieces.push(index);
+    });
+    spec.months.forEach((month, m) => {
+      let weight = 0;
+      let time = 0;
+      for (const index of pieces) {
+        const base = (index * nMonths + m) * 2;
+        if (spec.q[base] === none) continue;
+        const mph = spec.q[base] / 10;
+        const w = spec.q[base + 1] * spec.scale;
+        if (!(mph > 0) || !(w > 0)) continue;
+        weight += w;
+        time += w / mph;
+      }
+      byMonth.set(month, time > 0 ? weight / time : null);
+      totalWeight += weight;
+      totalTime += time;
+    });
+  }
+  const result = {
+    months: data.meta.months.map((month) => ({ month, mph: byMonth.get(month) ?? null })),
+    average: totalTime > 0 ? totalWeight / totalTime : null,
+  };
+  data.speed.cache.set(cacheKey, result);
+  return result;
 }
 
 async function loadServiceMonth(data, snap) {
