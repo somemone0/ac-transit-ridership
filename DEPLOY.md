@@ -26,7 +26,7 @@ between the two.
 | Cloud Run service | `ac-transit-ridership` |
 | Live URL | `https://ac-transit-ridership-385939155005.us-west1.run.app` |
 | Data bucket | `gs://ac-transit-ridership-pack` |
-| Data base URL (live) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack-2026-09-17` |
+| Data base URL (live) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack-2026-09-18` |
 | Data base URL (default in Dockerfile) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack` |
 | Build service account | `385939155005-compute@developer.gserviceaccount.com` |
 | HF dataset | `somemone/ac-transit-apc` |
@@ -126,7 +126,7 @@ the CARTO key, so it always lands on the OSM fallback.
 
 ## Updating the data bundle
 
-**Which prefix is live.** The deployed revision reads `pack-2026-09-17`, not
+**Which prefix is live.** The deployed revision reads `pack-2026-09-18`, not
 `pack`, because a dated prefix was the only way to get a data fix out without
 waiting a day for cached copies of `pack/` to expire. Upload new data to the
 prefix the running revision uses — check it with:
