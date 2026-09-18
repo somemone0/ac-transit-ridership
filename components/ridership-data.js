@@ -209,6 +209,7 @@ export async function loadVisualizationData() {
     corridorNodes: {},
     geo: {},
     routeSections: buildRouteSectionIndex(meta),
+    sectionRoutes: meta.geometry.sections.route,
     routeNameIx: new Map(meta.route_names.map((route, index) => [route, index])),
     domains: {},
     corridorStats: {},
@@ -765,6 +766,21 @@ export function routeBoardings(data, route, week) {
   };
 }
 
+// The same boardings across every week, for charting.
+export function routeBoardingsSeries(data, route) {
+  const real = new Float64Array(data.W);
+  const imp = new Float64Array(data.W);
+  const row = data.routeW.ix.get(route);
+  if (row === undefined) return { real, imp };
+  const scale = data.routeW.scale[row];
+  for (let week = 0; week < data.W; week += 1) {
+    const offset = (row * data.W + week) * 2;
+    real[week] = data.routeW.q[offset] * scale;
+    imp[week] = data.routeW.q[offset + 1] * scale;
+  }
+  return { real, imp };
+}
+
 export function routeOwnSeries(data, route) {
   const real = new Float64Array(data.W);
   const imp = new Float64Array(data.W);
@@ -820,6 +836,55 @@ export function routeStreetSeries(data, route) {
     if (count) eras.push({ era, nsec: count, dirs: [...directions] });
   }
   return { real, imp, eras };
+}
+
+/* Boardings on every line that runs along the same streets as `route`, this
+   route included. The pack stores boardings per route, not per street, so each
+   corridor section's load is converted with the average trip length of the
+   route that runs it -- load divided by that route's own sections per rider in
+   the same week. Sections repeat across corridor pieces, so each counts once. */
+export function routeStreetBoardingsSeries(data, route) {
+  const real = new Float64Array(data.W);
+  const imp = new Float64Array(data.W);
+  const sprCache = new Map();
+  const sprFor = (line) => {
+    if (!sprCache.has(line)) {
+      const load = routeOwnSeries(data, line);
+      const boardings = routeBoardingsSeries(data, line);
+      const spr = new Float64Array(data.W);
+      for (let week = 0; week < data.W; week += 1) {
+        const trips = boardings.real[week] + boardings.imp[week];
+        spr[week] = trips > 0 ? (load.real[week] + load.imp[week]) / trips : 0;
+      }
+      sprCache.set(line, spr);
+    }
+    return sprCache.get(line);
+  };
+  const seen = new Set();
+  for (const era of Object.keys(data.corridors)) {
+    const section = data.sections[era];
+    if (!section) continue;
+    for (const feature of data.corridors[era]) {
+      if (!feature.r.some((routeDirection) => routeDirection.split("|")[0] === route)) continue;
+      for (const sectionId of feature.s) {
+        if (seen.has(sectionId)) continue;
+        seen.add(sectionId);
+        const row = section.idIndex.get(sectionId);
+        if (row === undefined) continue;
+        const spr = sprFor(data.sectionRoutes[sectionId]);
+        for (let week = section.weekLo; week < section.weekLo + section.nWeeks; week += 1) {
+          const perRider = spr[week];
+          if (!(perRider > 0)) continue;
+          const index = row * section.nWeeks + (week - section.weekLo);
+          const load = section.load[index] * section.scale[row];
+          const imputed = load * (section.imp[index] / 255);
+          real[week] += (load - imputed) / perRider;
+          imp[week] += imputed / perRider;
+        }
+      }
+    }
+  }
+  return { real, imp };
 }
 
 /* ---------------------------------------------------------------- commute */

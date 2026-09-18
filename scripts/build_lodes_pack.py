@@ -27,17 +27,30 @@ YEARS = range(2019, 2024)
 
 
 def fetch(year):
+    """The cached OD file for one year, downloading it if it is not there.
+
+    Downloads land in a .part file and are renamed only once the transfer
+    finishes, so an interrupted run cannot leave a truncated archive that the
+    next run mistakes for a complete cache entry.
+    """
     path = CACHE / f"ca_od_main_JT01_{year}.csv.gz"
-    if not path.exists():
-        url = f"{BASE}/ca_od_main_JT01_{year}.csv.gz"
-        print(f"downloading {url}")
-        req = urllib.request.Request(url, headers={"Accept-Encoding": "gzip"})
-        with urllib.request.urlopen(req, timeout=600) as resp, open(path, "wb") as out:
+    if path.exists():
+        return path
+    CACHE.mkdir(parents=True, exist_ok=True)
+    url = f"{BASE}/ca_od_main_JT01_{year}.csv.gz"
+    print(f"downloading {url}")
+    part = path.with_suffix(path.suffix + ".part")
+    req = urllib.request.Request(url, headers={"Accept-Encoding": "gzip"})
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp, open(part, "wb") as out:
             while True:
                 chunk = resp.read(1 << 20)
                 if not chunk:
                     break
                 out.write(chunk)
+        part.replace(path)
+    finally:
+        part.unlink(missing_ok=True)
     return path
 
 
@@ -82,6 +95,7 @@ def main():
         print(f"{year}: {jobs.sum():,.0f} primary jobs, {workers.sum():,.0f} resident workers "
               f"in {len(tracts)} tracts")
     target = PACK / "lodes.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(out, separators=(",", ":")).encode()
     target.write_bytes(payload)
     print(f"wrote {target} ({len(payload) / 1e3:.0f} KB)")

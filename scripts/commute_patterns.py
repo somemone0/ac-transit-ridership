@@ -30,7 +30,12 @@ SF = "06075"
 
 
 def pool_od(snapshots, level="tract"):
-    """Pooled (avg per-snapshot) in- and out-lists across snapshots."""
+    """Pooled (avg per-snapshot) in- and out-lists across snapshots.
+
+    Each snapshot contributes only its top-K lists, so a pair that drops out
+    of the top-K in some snapshots is averaged as if it were zero there: the
+    pooled flow is a floor for marginal pairs, exact for the big ones.
+    """
     acc_out, acc_in = {}, {}
     for s in snapshots:
         ins, outs = parse_od(s, level)
@@ -51,7 +56,14 @@ def pool_marginals(snapshots):
 
 
 def topk(d, k):
-    return [v for v, _ in sorted(d.items(), key=lambda kv: -kv[1])[:k]]
+    """The k keys with the largest values, largest first."""
+    return [key for key, _ in sorted(d.items(), key=lambda kv: -kv[1])[:k]]
+
+
+def top_names(d, tracts, k=4):
+    """'400100 (123), ...' for the k biggest entries of {key: flow}, or '-'."""
+    items = sorted(d.items(), key=lambda kv: -kv[1])[:k]
+    return ", ".join(f"{tracts[t][5:]} ({f:.0f})" for t, f in items) or "-"
 
 
 def compare_pooled(label, pooled_out, bd, al, lodes_year, tracts):
@@ -72,11 +84,11 @@ def compare_pooled(label, pooled_out, bd, al, lodes_year, tracts):
     by_origin = {}
     for (o, d), f in pooled_out.items():
         by_origin.setdefault(o, {})[d] = f
+    lodes_by_origin = {}
+    for (o, d), f in lp.items():
+        lodes_by_origin.setdefault(o, {})[d] = f
     for o, dests in by_origin.items():
-        ldests = {}
-        for (oo, d), f in lp.items():
-            if oo == o:
-                ldests[d] = f
+        ldests = lodes_by_origin.get(o, {})
         to, tl = topk(dests, 10), topk(ldests, 10)
         if len(to) >= 10 and len(tl) >= 10:
             ovs.append(len(set(to) & set(tl)) / 10)
@@ -86,9 +98,12 @@ def compare_pooled(label, pooled_out, bd, al, lodes_year, tracts):
                          [ldests.get(d, 0) for d in union])
             if not np.isnan(r):
                 rhos.append(r)
-    print(f"top-10 destination overlap: mean {np.mean(ovs):.2f} "
-          f"(median {np.median(ovs):.2f}, n={len(ovs)}); "
-          f"per-origin rank rho: median {np.median(rhos):.2f} (n={len(rhos)})")
+    mean_ov = np.mean(ovs) if ovs else np.nan
+    med_ov = np.median(ovs) if ovs else np.nan
+    med_rho = np.median(rhos) if rhos else np.nan
+    print(f"top-10 destination overlap: mean {mean_ov:.2f} "
+          f"(median {med_ov:.2f}, n={len(ovs)}); "
+          f"per-origin rank rho: median {med_rho:.2f} (n={len(rhos)})")
 
     ixg = np.array(tracts)
     our_al = pd.Series(al, index=ixg)
@@ -114,7 +129,7 @@ def compare_pooled(label, pooled_out, bd, al, lodes_year, tracts):
     big = sorted(by_origin, key=lambda o: -sum(by_origin[o].values()))[:3]
     print("eyeball check, biggest origins (ours vs LODES top-8 destinations):")
     for o in big:
-        ldests = {d: f for (oo, d), f in lp.items() if oo == o}
+        ldests = lodes_by_origin.get(o, {})
         print(f"  {tracts[o]} (riders {sum(by_origin[o].values()):.0f}, "
               f"lodes-out {sum(ldests.values()):.0f})")
         print(f"    ours : {', '.join(f'{tracts[d][5:]} ({by_origin[o][d]:.1f})' for d in topk(by_origin[o], 8))}")
@@ -174,16 +189,12 @@ def main():
             by_dest.setdefault(d, {})[o] = f
         print(f"\n=== {era}: top destination tracts (avg-wkday AM arrivals) ===")
         for i in np.argsort(-al)[:8]:
-            print(f"  {tracts[i]}: {al[i]:,.0f} riders | catchment: "
-                  f"{', '.join(tracts[o][5:] + f' ({f:.0f})' for o, f in
-                              list(sorted(by_dest.get(i, {}).items(),
-                                          key=lambda kv: -kv[1]))[:4]) or '-'}")
+            catchment = top_names(by_dest.get(i, {}), tracts)
+            print(f"  {tracts[i]}: {al[i]:,.0f} riders | catchment: {catchment}")
         print(f"=== {era}: top residence tracts (avg-wkday AM boardings) ===")
         for i in np.argsort(-bd)[:8]:
-            print(f"  {tracts[i]}: {bd[i]:,.0f} riders | top destinations: "
-                  f"{', '.join(tracts[d][5:] + f' ({f:.0f})' for d, f in
-                              list(sorted(by_origin.get(i, {}).items(),
-                                          key=lambda kv: -kv[1]))[:4]) or '-'}")
+            dests = top_names(by_origin.get(i, {}), tracts)
+            print(f"  {tracts[i]}: {bd[i]:,.0f} riders | top destinations: {dests}")
         print(f"=== {era}: biggest O-D pairs ===")
         for (o, d), f in sorted(out.items(), key=lambda kv: -kv[1])[:8]:
             print(f"  {tracts[o][5:]} -> {tracts[d][5:]}: {f:,.0f} riders/wkday")

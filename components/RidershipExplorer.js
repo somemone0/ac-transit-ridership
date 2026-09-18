@@ -64,9 +64,9 @@ import {
   ramp,
   rawAt,
   regionSpeed,
-  routeBoardings,
+  routeBoardingsSeries,
   routeOwnSeries,
-  routeStreetSeries,
+  routeStreetBoardingsSeries,
   routesFor,
   sectionLoad,
   selectionSeries,
@@ -229,32 +229,47 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
   );
 }
 
-function getCachedRouteSeries(data, route) {
+function getCachedRouteLoad(data, route) {
   if (!data.routeSeriesCache) data.routeSeriesCache = {};
   // A route's series spans every era; until they are all loaded it is
   // partial, so it is recomputed rather than cached.
   const complete = Object.keys(data.corridors).length === Object.keys(data.meta.sections).length;
-  if (!complete) {
-    return { own: routeOwnSeries(data, route), street: routeStreetSeries(data, route) };
-  }
+  if (!complete) return routeOwnSeries(data, route);
   if (!data.routeSeriesCache[route]) {
-    data.routeSeriesCache[route] = {
-      own: routeOwnSeries(data, route),
-      street: routeStreetSeries(data, route),
-    };
+    data.routeSeriesCache[route] = routeOwnSeries(data, route);
   }
   return data.routeSeriesCache[route];
 }
 
+function getCachedRouteBoardings(data, route) {
+  if (!data.routeBoardingsCache) data.routeBoardingsCache = {};
+  const complete = Object.keys(data.corridors).length === Object.keys(data.meta.sections).length;
+  if (!complete) {
+    return {
+      own: routeBoardingsSeries(data, route),
+      street: routeStreetBoardingsSeries(data, route),
+    };
+  }
+  if (!data.routeBoardingsCache[route]) {
+    data.routeBoardingsCache[route] = {
+      own: routeBoardingsSeries(data, route),
+      street: routeStreetBoardingsSeries(data, route),
+    };
+  }
+  return data.routeBoardingsCache[route];
+}
+
 function RouteDetail({ data, route, week, routeMode, onModeChange, commute, periodIdx }) {
   const { meta } = data;
-  const cached = getCachedRouteSeries(data, route);
-  const own = cached.own;
-  const street = cached.street;
-  const series = routeMode === "own" ? own : street;
-  const currentLoad = series.real[week] + series.imp[week];
-  const streetLoad = street.real[week] + street.imp[week];
-  const boardings = routeBoardings(data, route, week);
+  const ownLoad = getCachedRouteLoad(data, route);
+  const cached = getCachedRouteBoardings(data, route);
+  const ownBoardings = cached.own;
+  const streetBoardings = cached.street;
+  const series = routeMode === "own" ? ownBoardings : streetBoardings;
+  const current = series.real[week] + series.imp[week];
+  const ownCurrent = ownBoardings.real[week] + ownBoardings.imp[week];
+  const ownLoadCurrent = ownLoad.real[week] + ownLoad.imp[week];
+  const streetCurrent = streetBoardings.real[week] + streetBoardings.imp[week];
   const isScheduleOnly = (meta.sched_only_routes || []).includes(route);
 
   return (
@@ -276,30 +291,27 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
         </button>
       </div>
       <div style={{ marginBottom: 6 }}>
-        <Row label={`Onboard load / wk, week of ${meta.weeks[week]}`}>
+        <Row label={`Boardings / wk, week of ${meta.weeks[week]}`}>
           <DisclosureValue real={series.real[week]} imp={series.imp[week]} />
         </Row>
         <Row label="Imputed">
-          {currentLoad > 0 ? `${(100 * series.imp[week] / currentLoad).toFixed(1)}%` : "-"}
+          {current > 0 ? `${(100 * series.imp[week] / current).toFixed(1)}%` : "-"}
         </Row>
-        <Row label="Share of street total">
-          {streetLoad > 0 ? `${(100 * (own.real[week] + own.imp[week]) / streetLoad).toFixed(0)}%` : "-"}
+        <Row label="Share of street boardings">
+          {streetCurrent > 0 ? `${(100 * ownCurrent / streetCurrent).toFixed(0)}%` : "-"}
         </Row>
-        {boardings ? (
-          <>
-            <Row label="Boardings / wk">
-              <DisclosureValue real={boardings.real} imp={boardings.imp} />
-            </Row>
-            <Row label="Sections per rider">
-              {boardings.real + boardings.imp > 0 && !isScheduleOnly
-                ? ((own.real[week] + own.imp[week]) / (boardings.real + boardings.imp)).toFixed(1)
-                : "-"}
-            </Row>
-          </>
-        ) : null}
+        <Row label="Sections per rider">
+          {ownCurrent > 0 && !isScheduleOnly
+            ? (ownLoadCurrent / ownCurrent).toFixed(1)
+            : "-"}
+        </Row>
       </div>
       <RouteServiceTable data={data} route={route} week={week} />
-      <h4>Weekly onboard load (person-segments) 2019-2026</h4>
+      <h4>
+        {routeMode === "own"
+          ? "Weekly boardings on this route, 2019-2026"
+          : "Weekly boardings on the lines using its streets, 2019-2026"}
+      </h4>
       <SeriesChart series={series} meta={meta} />
       <CommutePanel
         data={data}
@@ -310,15 +322,15 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
       />
       {isScheduleOnly ? (
         <p className="hint schedule-warning">
-          None of this line’s buses had a working passenger counter, so the chart above is estimated
+          None of this line’s buses had a working passenger counter, so the figures above are estimated
           from its schedule and from how riders used the stops of the lines it replaced. How full the bus is along the route is <b>not
-          reliable</b> here; the weekly boardings figure is the better guide.
+          reliable</b> here; the weekly boardings are the better guide.
         </p>
       ) : null}
       <p className="hint">
         {routeMode === "own"
-          ? "Riders on board, added up over every stop-to-stop segment of this route. Someone who rides ten segments counts ten times, so this is larger than the number of boardings."
-          : "Riders on board for every line that uses the same streets as this route, this route included. It shows how busy the streets are, not this line alone."}
+          ? "Boardings per week on this route, each rider counted once per trip. The same rider changing buses counts again."
+          : "Boardings per week on every line that uses the same streets as this route, this route included. It shows how busy the streets are, not this line alone."}
       </p>
     </>
   );
@@ -1769,6 +1781,7 @@ function AboutModal({ onClose }) {
         </p>
         <div className="about-actions">
           <a className="about-link" href="/story">Read the story →</a>
+          <a className="about-link" href="/methodology">Methodology →</a>
           <button className="btn" type="button" onClick={onClose}>Explore the map</button>
         </div>
       </div>

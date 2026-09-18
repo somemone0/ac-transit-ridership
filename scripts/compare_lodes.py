@@ -28,6 +28,8 @@ CACHE = (Path(os.environ.get("ACPRA_VIS", NEXT.parent / "vis"))
          / "data" / "lodes_cache")
 
 COUNTIES = ["06001", "06013", "06085", "06075", "06081"]
+LODES_YEARS = range(2019, 2024)   # what LEHD has published; keep in sync with
+                                  # build_lodes_pack.py and lodesYearFor()
 
 
 def parse_od(snapshot, level="tract"):
@@ -115,7 +117,9 @@ def spearman(a, b):
 
 
 def compare(snapshot, tracts, outdir):
-    year = int(snapshot[:4])
+    # Snapshots run past the last published LODES year, so clamp rather than
+    # send the user after a file census.gov does not have.
+    year = min(max(int(snapshot[:4]), LODES_YEARS[0]), LODES_YEARS[-1])
     ix = {g: i for i, g in enumerate(tracts)}
     # out-list keys are indexes into the tracts array; keep in-set destinations
     ours = {}
@@ -139,10 +143,13 @@ def compare(snapshot, tracts, outdir):
     # ---- per-origin top-destination overlap and rank correlation ----
     k_s = (5, 10)
     recs = []
+    lodes_by_origin = {}
+    for (o, d), f in lp.items():
+        lodes_by_origin.setdefault(o, {})[d] = f
     for o, dests in ours.items():
         if not dests:
             continue
-        ldests_all = {d[1]: f for d, f in lp.items() if d[0] == o}
+        ldests_all = lodes_by_origin.get(o, {})
         tot_o = sum(dests.values())
         tl_sum = sum(ldests_all.values())
         row = {"tract": tracts[o], "our_flows": round(tot_o, 1),
@@ -156,11 +163,13 @@ def compare(snapshot, tracts, outdir):
             row["rho"] = spearman([dests.get(d, 0) for d in union],
                                   [ldests_all.get(d, 0) for d in union])
         recs.append(row)
-    r = pd.DataFrame(recs)
+    # Columns only exist if some origin filled that top-k, so name them all.
+    r = pd.DataFrame(recs, columns=["tract", "our_flows", "lodes_jobs",
+                                    "ov5", "ov10", "rho"])
     ov10 = r.ov10.dropna()
     rho = r.rho.dropna()
-    wgt = (r.assign(w=r.our_flows * r.ov10.fillna(0))
-           .w.sum() / r.our_flows[r.ov10.notna()].sum())
+    flow_sum = r.our_flows[r.ov10.notna()].sum()
+    wgt = (r.our_flows * r.ov10.fillna(0)).sum() / flow_sum if flow_sum else np.nan
     print(f"top-10 destination overlap: mean {ov10.mean():.2f}, "
           f"median {ov10.median():.2f} over {len(ov10)} tracts "
           f"(volume-weighted {wgt:.2f}); top-5: {r.ov5.mean():.2f}")
@@ -185,7 +194,7 @@ def compare(snapshot, tracts, outdir):
     for g in lod_w.sort_values(ascending=False).index[:4]:
         o = ix[g]
         to = topk(ours.get(o, {}), 5)
-        tl = topk({d[1]: f for d, f in lp.items() if d[0] == o}, 5)
+        tl = topk(lodes_by_origin.get(o, {}), 5)
         fmt = lambda ks: ", ".join(tracts[t][5:] + f" ({ours.get(o, {}).get(t, 0):.0f})"
                                    if t in ours.get(o, {}) else tracts[t][5:]
                                    for t in ks)
