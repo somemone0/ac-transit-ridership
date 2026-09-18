@@ -269,6 +269,11 @@ export default function Story() {
           section is for observed ridership from the sensors, and the gold section is for estimated data from total
           ridership from buses without sensor technology.
         </p>
+        <p>
+          How every figure here is made — the counter correction, the weekly blend that carries it, and
+          where the result is known to be wrong — is set out on the <a href="/methodology">methodology
+          page</a>.
+        </p>
         <p className="story-cta-wrap">
           <a className="story-cta" href="/">See the data →</a>
         </p>

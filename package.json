@@ -11,6 +11,7 @@
     "build:commute": "python3 scripts/build_commute_pack.py"
   },
   "dependencies": {
+    "katex": "^0.18.7",
     "leaflet": "^1.9.4",
     "next": "^15.5.0",
     "react": "^19.1.0",

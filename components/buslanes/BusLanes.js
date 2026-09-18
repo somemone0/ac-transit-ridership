@@ -248,7 +248,7 @@ export default function BusLanes() {
           Four streets in the AC Transit service area gained bus lanes with a documented start date between 2019
           and 2026. This page compares how fast buses moved on each in the year before and the year after.
         </p>
-        <p className="bl-links"><a href="/">Explore the map</a> · <a href="/story">Read the story</a></p>
+        <p className="bl-links"><a href="/">Explore the map</a> · <a href="/story">Read the story</a> · <a href="/methodology">Methodology</a></p>
       </header>
 
       {error ? <p className="bl-error">The data could not be loaded: {error.message}</p> : null}

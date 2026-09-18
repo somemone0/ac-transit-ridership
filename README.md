@@ -72,6 +72,11 @@ binary bundle the browser can page through without a server round trip.
   before and after, beside the network's change over the same months.
 - **Median household income** by tract and block group (ACS 5-year, 2024,
   table B19013) as an overlay.
+- **Methodology** (`/methodology`) — how every figure is produced, in the
+  order that matters: the counter capture correction and the weekly blend
+  first, then O–D inference, corridor map-matching, speeds, and a section on
+  what is known to be wrong. Server-rendered KaTeX and inline SVG diagrams;
+  the page ships no client JavaScript.
 
 Counts are split into *observed* and *imputed* components throughout. Where a
 route–direction's APC coverage was too thin to trust, the shortfall is scaled
