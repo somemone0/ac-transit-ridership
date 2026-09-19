@@ -496,14 +496,18 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
       for (const [region, regionAlpha] of regions) {
         inRegion(region, () => {
           const layerAlpha = regionAlpha * alpha.areas;
-          context.lineWidth = 0.7;
           context.strokeStyle = EDGE;
           for (const area of areas) {
             const base = area.color ? 0.68 : 0.15;
-            context.globalAlpha = base * (area.dim ? 0.18 : 1) * layerAlpha;
+            context.globalAlpha = base * (area.dim ? 0.07 : 1) * layerAlpha;
             context.fillStyle = area.color || NO_DATA;
             context.fill(area.path, "evenodd");
-            context.globalAlpha = layerAlpha;
+            // While a decile is highlighted its tracts are outlined, so
+            // neighbours in the same decile read as separate places rather
+            // than as one mass, and everything else lets its border fade with
+            // its fill instead of leaving a full-strength grid behind.
+            context.globalAlpha = (area.dim ? 0.1 : 1) * layerAlpha;
+            context.lineWidth = highlight && !area.dim ? 1.2 : 0.7;
             context.stroke(area.path);
           }
         });

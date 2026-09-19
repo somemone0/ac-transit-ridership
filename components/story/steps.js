@@ -27,6 +27,9 @@ export const BOUNDS = {
   berkeley: [[37.848, -122.318], [37.9065, -122.235]],
   eastBay: [[37.718, -122.405], [37.905, -122.15]],
   campusFlows: [[37.8, -122.33], [37.9, -122.215]],
+  // The income deciles are drawn from tracts across the whole service area,
+  // so those passages pull back further than the rest of the section.
+  incomeBay: [[37.65, -122.47], [37.94, -122.09]],
   southEastBay: [[37.49, -122.42], [37.9, -121.92]],
 };
 
@@ -132,7 +135,7 @@ export const MAP_ONE = [
     // Deciles are of tract median household income (ACS 2024 5-year B19013);
     // the recovery figure is the two groups' riders in the story's week over
     // the same tracts' riders in the Feb 2020 baseline week.
-    scene: { income: "high", callout: null },
+    scene: { income: "high", callout: null, bounds: "incomeBay" },
     text: [
       `High-income areas saw the largest post-pandemic decline, at ${income.high_recovery_pct}% of pre-pandemic ridership.`,
     ],
@@ -206,7 +209,7 @@ export const MAP_THREE = [
       period: "day",
       level: "group",
       routes: true,
-      mask: true,
+      mask: false,
       commuteMeasure: null,
       bounds: "berkeley",
       week: "feb2020",
