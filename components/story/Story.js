@@ -1,17 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SelectionChart } from "../Charts";
-import { ensureData, everything, loadVisualizationData, selectionSeries } from "../ridership-data";
+import { ensureData, everything, loadVisualizationData } from "../ridership-data";
 import StoryMap from "./StoryMap";
-import { prepareStory, resolvePlaces } from "./prepare";
-import { BOUNDS, MAP_ONE, MAP_TWO, RECOVERY_SCENE, resolveScene, resolveScenes } from "./steps";
+import { resolvePlaces } from "./prepare";
+import { BOUNDS, MAP_ONE, MAP_THREE, MAP_TWO, resolveScenes } from "./steps";
 
 // Where in the viewport a passage has to reach before the map switches to it.
 const TRIGGER = 0.62;
 // Where the top of a scrub step's empty stretch has to reach to start moving
 // the week.
 const SCRUB_START = 0.1;
+// The months the traffic passages name, which must be loaded exactly.
+const SPEED_ANCHORS = ["2020-02", "2020-12", "2021-09", "2026-02"];
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -100,58 +101,17 @@ function ScrollySection({ data, places, steps, label, first = "85vh" }) {
           >
             <div className="scrolly-card" ref={(element) => { cardRefs.current[index] = element; }}>
               {step.text.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+              {step.link ? (
+                <p className="scrolly-cta-wrap">
+                  <a className="story-cta" href={step.link.href}>{step.link.label}</a>
+                </p>
+              ) : null}
             </div>
           </div>
         ))}
         <div className="scrolly-tail" />
       </div>
     </section>
-  );
-}
-
-function RecoveryFigure({ data, places }) {
-  const apiRef = useRef(null);
-  const scene = useMemo(
-    () => (data && places ? resolveScene({ ...RECOVERY_SCENE, marks: [] }, data, places) : null),
-    [data, places],
-  );
-  const show = useCallback(() => {
-    if (apiRef.current && scene) apiRef.current.update(scene, scene.weekIndex, null);
-  }, [scene]);
-  useEffect(show, [show]);
-  return (
-    <figure className="story-figure wide">
-      <div className="story-figure-map">
-        <StoryMap
-          data={data}
-          initialBounds={BOUNDS[RECOVERY_SCENE.bounds]}
-          apiRef={apiRef}
-          onReady={show}
-          layout="figure"
-          label="Map of when each East Bay block group returned to its February 2020 ridership"
-        />
-      </div>
-      <figcaption>
-        Recovery time, block groups. Colour marks the first month a block group held 100% of its
-        February 2020 ridership for three straight months; red areas have not yet.
-      </figcaption>
-    </figure>
-  );
-}
-
-function CampusChart({ data }) {
-  const prep = data ? prepareStory(data) : null;
-  const series = useMemo(() => (data && prep ? selectionSeries(data, prep.campusKeys) : null), [data, prep]);
-  return (
-    <figure className="story-figure">
-      <div className="story-chart">
-        {series ? <SelectionChart series={series} meta={data.meta} /> : <div className="story-chart-loading">Loading…</div>}
-      </div>
-      <figcaption>
-        Weekly boardings and drop-offs at the {prep ? prep.campusKeys.length : ""} stop groups around the UC Berkeley
-        campus, January 2019 through May 2026. Blue: observed by automatic people counters. Gold: estimated.
-      </figcaption>
-    </figure>
   );
 }
 
@@ -166,6 +126,16 @@ export default function Story() {
     loadVisualizationData()
       .then(async (loaded) => {
         await ensureData(loaded, everything(loaded));
+        // The traffic section colours corridors by observed speed, which lives
+        // in one file per month. Fetching all 89 would be megabytes for a
+        // section that scrubs across six years, so it takes the months the
+        // passages stop on plus a step every half year; the map falls back to
+        // the nearest loaded month in between.
+        const snapshots = loaded.service?.snapshots || [];
+        const wanted = snapshots.filter((snap, index) => (
+          index % 6 === 0 || SPEED_ANCHORS.includes(snap.id)
+        ));
+        await Promise.all(wanted.map((snap) => ensureData(loaded, { serviceMonth: snap })));
         return loaded;
       })
       .then((loaded) => { if (!cancelled) setData(loaded); })
@@ -179,7 +149,8 @@ export default function Story() {
     <article className="story">
       <header className="story-hero">
         <p className="story-kicker">AC Transit, 2019–2026</p>
-        <h1>An uneven recovery</h1>
+        <h1>See how AC Transit ridership recovered from the pandemic</h1>
+        <p className="story-byline">John Schultz</p>
         <p className="story-lede">
           While AC Transit ridership has increased from the pandemic, the recovery has been uneven. Some places
           have fully reached pre-pandemic levels of ridership while some have still yet to reach half of
@@ -200,24 +171,10 @@ export default function Story() {
 
       <div className="story-body">
         <p>
-          This data and more are available on an <a href="/">interactive app</a>.
+          To see this data, visit the <a href="/">interactive app</a>.
         </p>
 
-        <h2>Inferred rides</h2>
-        <p>
-          Using Iterative Proportional Fitting (IPF), the origins and destinations of bus riders can be estimated.
-          Current data doesn’t collect the trips that riders make, only that a certain number of people entered and
-          exited the bus at a given stop.
-        </p>
-        <p>
-          Like all estimation methods, the estimation is not perfect. When tested against BART, which does collect
-          these trips, this method achieved an 80% accuracy rate. The model is unable to estimate basic elements of
-          bus usage, like transfers between buses.
-        </p>
-        <p>
-          To see estimated trips, select “Commute pattern” and select one or more block groups, Census tracts, or
-          stop groups.
-        </p>
+        <h2>Where do people go on AC Transit?</h2>
       </div>
 
       <ScrollySection
@@ -229,46 +186,18 @@ export default function Story() {
       />
 
       <div className="story-body">
-        <h2>Where bus commuters live</h2>
-        <p>
-          The same counts can estimate where AC Transit’s commuters live. A morning bus trip is counted as a
-          commute only when the same trip is made in reverse that evening, which leaves out many errands and
-          one-way trips.
-        </p>
-        <p>
-          In February 2026, about half of these commuters, 49%, lived in Oakland, and 15% lived in Berkeley.
-          Those two cities are home to 23% and 5% of all employed residents in the area AC Transit serves,
-          according to the Census Bureau’s 2023 employment data, the latest available. Bus commuters are far
-          less common in southern Alameda County: Fremont is home to 13% of the area’s workers but about 2% of
-          its bus commuters. The pattern was much the same in 2019.
-        </p>
-        <p>
-          In the app, the Commute pattern view maps both measures and can compare them place by place.
-        </p>
+        <h2>Traffic</h2>
       </div>
 
-      <div className="story-body">
-        <h2>Recovery Time</h2>
-        <p>
-          The recovery time view shows when a stop group, block group, or Census tract reached its pre-pandemic
-          level of ridership.
-        </p>
-      </div>
-
-      <RecoveryFigure data={data} places={places} />
+      <ScrollySection
+        data={data}
+        places={places}
+        steps={MAP_THREE}
+        first="70vh"
+        label="Map of observed AC Transit bus speeds on Berkeley streets"
+      />
 
       <div className="story-body">
-        <h2>Selection View</h2>
-      </div>
-
-      <CampusChart data={data} />
-
-      <div className="story-body">
-        <p>
-          Shift-clicking and selecting a section of the map will show a graph of ridership over time. The blue
-          section is for observed ridership from the sensors, and the gold section is for estimated data from total
-          ridership from buses without sensor technology.
-        </p>
         <p>
           How every figure here is made — the counter correction, the weekly blend that carries it, and
           where the result is known to be wrong — is set out on the <a href="/methodology">methodology
@@ -278,6 +207,7 @@ export default function Story() {
           <a className="story-cta" href="/">See the data →</a>
         </p>
       </div>
+
     </article>
   );
 }

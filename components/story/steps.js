@@ -5,6 +5,10 @@
 // Weeks are the Monday a week starts on, as meta.weeks labels them. Each is a
 // representative week in the month the script names, clear of holidays:
 // 2020-02-03 is the app's own Feb 2020 baseline week.
+//
+// Figures quoted in the copy come from numbers.json, resolved once by
+// scripts/build_story_numbers.py rather than recomputed in the browser.
+import NUMBERS from "./numbers.json";
 
 export const WEEKS = {
   feb2020: "2020-02-03",
@@ -13,6 +17,8 @@ export const WEEKS = {
   nov2021: "2021-11-08",
   jul2022: "2022-07-11",
   aug2023: "2023-08-28",
+  dec2020: "2020-12-07",
+  sep2021: "2021-09-13",
   feb2026: "2026-02-09",
 };
 
@@ -21,9 +27,12 @@ export const BOUNDS = {
   berkeley: [[37.848, -122.318], [37.9065, -122.235]],
   eastBay: [[37.718, -122.405], [37.905, -122.15]],
   campusFlows: [[37.8, -122.33], [37.9, -122.215]],
+  southEastBay: [[37.49, -122.42], [37.9, -121.92]],
 };
 
 export const RECOVERY_THRESHOLD = 5; // meta.recovery_thresholds[5] = 100%
+
+const { income, speeds } = NUMBERS;
 
 export const MAP_ONE = [
   {
@@ -44,6 +53,7 @@ export const MAP_ONE = [
     text: [
       "However, especially pre-pandemic, many buses did not have these counters. The Daily Californian simulated rides using statistical methods based on route-level total ridership estimates from AC Transit. Simulated rides make up about 40% of rides in 2019, but decline to under 5% of rides after 2021. For some routes like the 1T in East Oakland and new routes after the 2025 Realign changes, simulated rides make up the majority of rides.",
     ],
+    link: { href: "/methodology", label: "See our methodology →" },
   },
   {
     text: [
@@ -97,30 +107,40 @@ export const MAP_ONE = [
     ],
   },
   {
-    scene: { level: "bgroup", routes: false },
+    scene: { level: "tract", routes: false },
     text: [
       "Six years on, the landscape of ridership in Berkeley looks very different. Ridership is up in central and downtown Berkeley and down in the edges of the city. In particular, ridership in the Berkeley Hills sits at 30% of pre-pandemic ridership.",
     ],
   },
   {
-    // From here the city bars use the past year against the year before the
-    // pandemic, the basis this passage quotes.
-    scene: { mask: false, bounds: "eastBay", series: "system", compare: "year" },
+    scene: { mask: false, bounds: "eastBay", series: "system" },
     text: [
-      "Over the past year, Berkeley’s bus stops saw 88% as many riders as in the year before the pandemic. That is ahead of Oakland at 84%, Richmond at 74% and Alameda at 64%, though Berkeley’s smaller neighbors Albany and Emeryville have come back further, to 100% and 93%. Much of Alameda, East Oakland, and Transbay service to San Francisco has never seen bus service return to 80% of February 2020’s level.",
+      "Berkeley fared similarly to the rest of the East Bay. Ridership in Berkeley is at 75% of pre-pandemic ridership, while Oakland is at 85%. South East Bay communities hang in the sixties.",
     ],
   },
   {
     scene: { callout: "tempo", trace: ["1T", "1"] },
     text: [
-      "The Tempo bus rapid transit line on International Boulevard, the 1T highlighted here, was completed during the pandemic and led to an increase in local ridership.",
+      "The Tempo bus rapid transit system, completed during the pandemic, led to an increase in local ridership along International Blvd.",
     ],
   },
   {
     scene: { callout: "transbay" },
+    text: ["Transbay service has remained at around 40% of pre-pandemic levels."],
+  },
+  {
+    // Deciles are of tract median household income (ACS 2024 5-year B19013);
+    // the recovery figure is the two groups' riders in the story's week over
+    // the same tracts' riders in the Feb 2020 baseline week.
+    scene: { income: "high", callout: null },
     text: [
-      "AC Transit’s Transbay buses, which cross the Bay Bridge to the Salesforce Transit Center in San Francisco, carried 48% as many riders over the past year as in the year before the pandemic.",
-      "The all-day lines have come back: the F carries slightly more riders than before, and the NL about three-quarters as many. Most weekday rush-hour lines, such as the J, P and V, carry a quarter to a third of their former riders, and nine lines have not run since March 2020.",
+      `High-income areas saw the largest post-pandemic decline, at ${income.high_recovery_pct}% of pre-pandemic ridership.`,
+    ],
+  },
+  {
+    scene: { income: "low" },
+    text: [
+      `Low-income areas saw the best recovery, at ${income.low_recovery_pct}% of pre-pandemic ridership.`,
     ],
   },
 ];
@@ -132,19 +152,23 @@ export const MAP_TWO = [
       level: "group",
       routes: false,
       mask: false,
+      income: null,
       bounds: "campusFlows",
       week: "feb2026",
       focus: { region: "campus", mode: "from" },
     },
     text: [
-      "Bus counters record how many people get on and off at each stop, not where each person rides. Using the method above, this map estimates where riders who board at stops around the UC Berkeley campus on a weekday morning get off. Greener dots mean more estimated riders.",
-      "In the interactive app, the same map is the “Inferred from here” option: choose the Commute pattern view and click any stop or area.",
+      "Using Iterative Proportional Fitting (IPF), the origins and destinations of bus riders can be estimated. Current data doesn’t collect the trips that riders make, only that a certain number of people entered and exited the bus at a given stop.",
+      "Like all estimation methods, the estimation is not perfect. When tested against BART, which does collect these trips, this method achieved an 80% accuracy rate. The model is unable to estimate basic elements of bus usage, like transfers between buses.",
     ],
+  },
+  {
+    text: ["These are estimated riders that travel from UC Berkeley in the morning on weekdays."],
   },
   {
     scene: { focus: { region: "campus", mode: "to" } },
     text: [
-      "Reversed, the map estimates where riders arriving at campus stops in the morning got on. In the app, this is “Inferred to here.”",
+      "These are estimated riders that travel to UC Berkeley in the morning on weekdays. We can infer that these are commuters.",
     ],
   },
   {
@@ -152,6 +176,68 @@ export const MAP_TWO = [
     text: [
       "Commuters to UC Berkeley are estimated to come from Rockridge BART and UC Village more than other places.",
     ],
+  },
+  {
+    scene: { level: "tract", commuteMeasure: "acHome", focus: null },
+    text: [
+      "This is where AC Transit commuters are estimated to live. Riders leave there in the morning and come back in the evening.",
+    ],
+  },
+  {
+    scene: { commuteMeasure: "compare" },
+    text: [
+      "This is AC Transit commuters as a percentage of all commuters, according to the US Census’s LODES survey. In some areas, over 5% of commuters commute via AC Transit.",
+    ],
+  },
+  {
+    scene: { bounds: "southEastBay" },
+    text: [
+      "AC Transit is used heavily in Oakland and Alameda, but in southern communities like Fremont, less than 0.5% of commuters use AC Transit.",
+      "To see estimated trips, select “Commute pattern” and select one or more block groups, Census tracts, or stop groups.",
+    ],
+    link: { href: "/", label: "See the data →" },
+  },
+];
+
+export const MAP_THREE = [
+  {
+    scene: {
+      view: "speed",
+      period: "day",
+      level: "group",
+      routes: true,
+      mask: true,
+      commuteMeasure: null,
+      bounds: "berkeley",
+      week: "feb2020",
+      series: "speed",
+    },
+    text: [
+      "Because we collect per-trip information, the timestamps of each stop can be derived. This is the speed, in miles per hour, that buses travel at on Berkeley streets. This figure is slower than the speeds cars would experience traveling through Berkeley because buses must stop off for passengers.",
+    ],
+  },
+  {
+    scrub: true,
+    scene: { week: "dec2020" },
+    text: [
+      `Like ridership, traffic in Berkeley declines during the pandemic. The median bus speed in Berkeley rose from ${speeds.feb2020.day.p50} mph to ${speeds.dec2020.day.p50} mph, the slowest tenth of bus-km from ${speeds.feb2020.day.p10} to ${speeds.dec2020.day.p10}, and the fastest tenth from ${speeds.feb2020.day.p90} to ${speeds.dec2020.day.p90}.`,
+    ],
+  },
+  {
+    scrub: true,
+    scene: { week: "sep2021" },
+    text: [
+      "Traffic followed the same pattern as ridership, only increasing when UC Berkeley students returned, and returning to normal when UC Berkeley fully ended pandemic measures in 2023.",
+    ],
+  },
+  {
+    scrub: true,
+    scene: { week: "feb2026" },
+    text: [
+      `Bus speeds differ vastly throughout the day. Surface speeds at night and at rush hour (peak) differ by ${speeds.night_vs_peak_pct}%.`,
+      "To see traffic speeds throughout the East Bay, select “Speed per corridor”.",
+    ],
+    link: { href: "/", label: "See the data →" },
   },
 ];
 
@@ -169,7 +255,7 @@ export const RECOVERY_SCENE = {
 // Callouts, marks and traced lines point at what one passage is talking about,
 // so they belong to that step alone and are not carried forward.
 export function resolveScenes(steps, data, places) {
-  let current = { focus: null, recThresh: RECOVERY_THRESHOLD };
+  let current = { focus: null, recThresh: RECOVERY_THRESHOLD, income: null, commuteMeasure: null };
   return steps.map((step) => {
     const { callout = null, marks = [], trace = null, ...inherited } = step.scene || {};
     current = { ...current, ...inherited };

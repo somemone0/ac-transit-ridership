@@ -55,6 +55,16 @@ function relativeSeries(data, keys) {
   return series;
 }
 
+function haversine(a, b) {
+  const r = 6371008.8;
+  const p1 = (a[0] * Math.PI) / 180;
+  const p2 = (b[0] * Math.PI) / 180;
+  const dp = p2 - p1;
+  const dl = ((b[1] - a[1]) * Math.PI) / 180;
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * r * Math.asin(Math.sqrt(h));
+}
+
 const cache = new WeakMap();
 
 export function prepareStory(data) {
@@ -81,46 +91,77 @@ export function prepareStory(data) {
     ) campusKeys.push(key);
   }
 
-  const bgroupIndex = new Map(meta.bgroups.map((id, index) => [String(id), index]));
-  const areas = [];
-  for (const feature of data.geo.blockgroups.features) {
-    const key = bgroupIndex.get(String(feature.properties?.geoid));
-    if (key === undefined || !feature.geometry) continue;
-    const polygons = feature.geometry.type === "Polygon"
-      ? [feature.geometry.coordinates]
-      : feature.geometry.coordinates;
-    const rings = [];
-    const bounds = [Infinity, Infinity, -Infinity, -Infinity];
-    let latSum = 0;
-    let lonSum = 0;
-    let count = 0;
-    for (const polygon of polygons) {
-      for (const ring of polygon) {
-        const projected = projectRing(ring, true);
-        rings.push(projected.pts);
-        bounds[0] = Math.min(bounds[0], projected.bounds[0]);
-        bounds[1] = Math.min(bounds[1], projected.bounds[1]);
-        bounds[2] = Math.max(bounds[2], projected.bounds[2]);
-        bounds[3] = Math.max(bounds[3], projected.bounds[3]);
+  // Areas are projected for both levels the story uses. A passage can switch
+  // from block groups to tracts without re-projecting, and the two sets are
+  // keyed by the same index space their weekly arrays use.
+  const projectAreas = (collection, keys) => {
+    const index = new Map(keys.map((id, i) => [String(id), i]));
+    const out = [];
+    for (const feature of collection?.features || []) {
+      const key = index.get(String(feature.properties?.geoid));
+      if (key === undefined || !feature.geometry) continue;
+      const polygons = feature.geometry.type === "Polygon"
+        ? [feature.geometry.coordinates]
+        : feature.geometry.coordinates;
+      const rings = [];
+      const bounds = [Infinity, Infinity, -Infinity, -Infinity];
+      let latSum = 0;
+      let lonSum = 0;
+      let count = 0;
+      for (const polygon of polygons) {
+        for (const ring of polygon) {
+          const projected = projectRing(ring, true);
+          rings.push(projected.pts);
+          bounds[0] = Math.min(bounds[0], projected.bounds[0]);
+          bounds[1] = Math.min(bounds[1], projected.bounds[1]);
+          bounds[2] = Math.max(bounds[2], projected.bounds[2]);
+          bounds[3] = Math.max(bounds[3], projected.bounds[3]);
+        }
+        for (const [lon, lat] of polygon[0]) {
+          lonSum += lon;
+          latSum += lat;
+          count += 1;
+        }
       }
-      for (const [lon, lat] of polygon[0]) {
-        lonSum += lon;
-        latSum += lat;
-        count += 1;
-      }
+      out.push({
+        key,
+        rings,
+        bounds,
+        inBerkeley: count > 0 && pointInRing(latSum / count, lonSum / count, BERKELEY_BOUNDARY),
+      });
     }
-    areas.push({
-      key,
-      rings,
-      bounds,
-      inBerkeley: count > 0 && pointInRing(latSum / count, lonSum / count, BERKELEY_BOUNDARY),
-    });
-  }
+    return out;
+  };
+
+  const areasByLevel = {
+    bgroup: projectAreas(data.geo.blockgroups, meta.bgroups),
+    tract: projectAreas(data.geo.tracts, meta.tracts),
+  };
+  const areas = areasByLevel.bgroup;
 
   const corridors = {};
+  // Which corridors lie in Berkeley and how long each one is, in metres. The
+  // traffic section needs both: the city filter for what it averages, and the
+  // length to weight that average by bus-km rather than by corridor count,
+  // which would let a 40 m stub count as much as Shattuck.
+  const corridorMeta = {};
   for (const [era, features] of Object.entries(data.corridors)) {
+    const latLngs = features.map((feature) => corridorLatLngs(feature));
     // The smoothed corridor curve, flattened: see corridorLatLngs.
-    corridors[era] = features.map((feature) => projectRing(corridorLatLngs(feature), false));
+    corridors[era] = latLngs.map((pts) => projectRing(pts, false));
+    corridorMeta[era] = latLngs.map((pts) => {
+      let length = 0;
+      let latSum = 0;
+      let lonSum = 0;
+      for (let i = 0; i < pts.length; i += 1) {
+        latSum += pts[i][0];
+        lonSum += pts[i][1];
+        if (i > 0) length += haversine(pts[i - 1], pts[i]);
+      }
+      const lat = latSum / pts.length;
+      const lon = lonSum / pts.length;
+      return { length, inBerkeley: pointInRing(lat, lon, BERKELEY_BOUNDARY) };
+    });
   }
 
   const prepared = {
@@ -130,7 +171,9 @@ export function prepareStory(data) {
     berkeleyGroups,
     campusKeys,
     areas,
+    areasByLevel,
     corridors,
+    corridorMeta,
     berkeley: projectRing(BERKELEY_BOUNDARY, false).pts,
     series: {
       berkeley: relativeSeries(data, berkeleyGroups),
