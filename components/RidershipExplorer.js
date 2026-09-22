@@ -170,37 +170,14 @@ function CommuteCellRows({ data, level, keyIndex, periodIdx, cells }) {
   );
 }
 
-function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, commuteCells }) {
+/* The detail panel's default tab: the place's weekly ridership across the
+   whole record, and when it first held each share of Feb 2020. */
+function RidershipOverTime({ data, series, recoveryTable }) {
   const { meta } = data;
-  const { lv: level, key: keyIndex } = detail;
-  const group = meta.stop_groups;
-  const routes = routesFor(data, level, keyIndex, week);
-  const recoveryTable = meta.recovery[level === "group" ? "stopgroup" : level]?.[keyIndex] || [];
-  const label = detail.label;
-  const series = selectionSeries(data, [keyIndex], level);
-  const members = level === "group" ? group.members[keyIndex] || [] : [];
-
   return (
     <>
-      <div style={{ marginBottom: 6 }}>
-        <StatRows data={data} level={level} keyIndex={keyIndex} week={week} />
-      </div>
       <h4>{t("explorer.headingWeekly")}</h4>
       <SeriesChart series={series} meta={meta} />
-      <CommuteCellRows
-        data={data}
-        level={level}
-        keyIndex={keyIndex}
-        periodIdx={periodIdx}
-        cells={commuteCells}
-      />
-      <CommutePanel
-        data={data}
-        commute={commute}
-        level={level}
-        keyIndex={keyIndex}
-        p={periodIdx}
-      />
       <h4>{t("explorer.headingRecovery")}</h4>
       {meta.recovery_thresholds.map((threshold, index) => {
         const month = recoveryTable[index];
@@ -216,6 +193,64 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
           </div>
         );
       })}
+    </>
+  );
+}
+
+function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, commuteCells }) {
+  const { meta } = data;
+  const { lv: level, key: keyIndex } = detail;
+  const group = meta.stop_groups;
+  const routes = routesFor(data, level, keyIndex, week);
+  const recoveryTable = meta.recovery[level === "group" ? "stopgroup" : level]?.[keyIndex] || [];
+  const label = detail.label;
+  const series = selectionSeries(data, [keyIndex], level);
+  const members = level === "group" ? group.members[keyIndex] || [] : [];
+  // The weekday pattern only exists where the commute pack saw riders, so the
+  // tabs appear only then; otherwise the panel is ridership over time alone.
+  const [tab, setTab] = useState("time");
+  const stats = commute ? commuteStats(commute, level, keyIndex, periodIdx) : null;
+  const hasPattern = !!stats && stats.total > 0;
+  const showing = hasPattern ? tab : "time";
+
+  return (
+    <>
+      <div style={{ marginBottom: 6 }}>
+        <StatRows data={data} level={level} keyIndex={keyIndex} week={week} />
+      </div>
+      <CommuteCellRows
+        data={data}
+        level={level}
+        keyIndex={keyIndex}
+        periodIdx={periodIdx}
+        cells={commuteCells}
+      />
+      {hasPattern ? (
+        <div className="seg detail-tabs">
+          {[["time", "explorer.tabOverTime"], ["weekday", "explorer.tabWeekdayPattern"]].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`segbtn${showing === value ? " on" : ""}`}
+              aria-pressed={showing === value}
+              onClick={() => setTab(value)}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {showing === "weekday" ? (
+        <CommutePanel
+          data={data}
+          commute={commute}
+          level={level}
+          keyIndex={keyIndex}
+          p={periodIdx}
+        />
+      ) : (
+        <RidershipOverTime data={data} series={series} recoveryTable={recoveryTable} />
+      )}
       <h4>{t("explorer.headingRoutes",
         { era: eraForWeek(data, week) || t("explorer.eraCurrent") })}</h4>
       {routes.length ? (
@@ -2471,6 +2506,24 @@ export default function RidershipExplorer() {
             ) : null}
           </section>
 
+          <section>
+            <h2>{t("explorer.headingSelection")}</h2>
+            <p className="hint">{t("explorer.hintSelection")}</p>
+            <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>
+              {t("explorer.clearSelection")}
+            </button>
+          </section>
+
+          <button className="btn about-btn" type="button" onClick={() => setAboutOpen(true)}>
+            {t("explorer.aboutTitle")}
+          </button>
+        </aside>
+
+        <main id="mapWrap" ref={mapWrapRef}>
+          <div id="map" ref={mapContainerRef} />
+          {/* The key floats over the map's top-right corner, where it stays in
+              view beside whatever it explains; the detail panel sits below it
+              in the bottom-right. */}
           <section id="legendBox">
             <h2>{t("explorer.headingLegend")}</h2>
             <Legend
@@ -2492,22 +2545,6 @@ export default function RidershipExplorer() {
                 : 1}
             />
           </section>
-
-          <section>
-            <h2>{t("explorer.headingSelection")}</h2>
-            <p className="hint">{t("explorer.hintSelection")}</p>
-            <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>
-              {t("explorer.clearSelection")}
-            </button>
-          </section>
-
-          <button className="btn about-btn" type="button" onClick={() => setAboutOpen(true)}>
-            {t("explorer.aboutTitle")}
-          </button>
-        </aside>
-
-        <main id="mapWrap" ref={mapWrapRef}>
-          <div id="map" ref={mapContainerRef} />
           {contextMenu ? (
             <div className="ctx-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
               <div className="ctx-head">{t("explorer.ctxRoutes")}</div>

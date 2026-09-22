@@ -149,22 +149,17 @@ export const MAP_TWO = [
       income: null,
       bounds: "campusFlows",
       week: "feb2026",
-      focus: { region: "campus", mode: "from" },
+      focus: { region: "campus", mode: "to" },
     },
     text: [t("story.two.ipf"), t("story.two.ipfAccuracy")],
   },
   {
-    id: "from-campus",
-    text: [t("story.two.fromCampus")],
-  },
-  {
     id: "to-campus",
-    scene: { focus: { region: "campus", mode: "to" } },
     text: [t("story.two.toCampus")],
   },
   {
     id: "marks",
-    scene: { marks: ["rockridge", "ucVillage"] },
+    scene: { marks: ["ucVillage"] },
     text: [t("story.two.marks")],
   },
   {

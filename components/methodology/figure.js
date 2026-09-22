@@ -582,14 +582,32 @@ function WeekPanel({ state }) {
             />
             <text className="mth-fig-label" x={LEFT - 22} y={-4} textAnchor="end">
               {t("figure.weekN", { n: week + 1 })}</text>
-            <Trips present={nodes} total={5} cols={5} gap={16} x={LEFT + PLOT_W + 32} y={-6} braced={false} />
-            <text className="mth-fig-label" x={LEFT + PLOT_W + 122} y={-2}>
-              {t("figure.pctOfMonth",
-                { pct: Math.round((blended ? pFinal[week] : pWeek[week]) * 100) })}
-            </text>
+            {blended ? (
+              <text className="mth-fig-label" x={LEFT + PLOT_W + 32} y={-2}>
+                {t("figure.pctShift", {
+                  from: Math.round(pWeek[week] * 100),
+                  to: Math.round(pFinal[week] * 100),
+                })}
+              </text>
+            ) : (
+              <>
+                <Trips present={nodes} total={5} cols={5} gap={16} x={LEFT + PLOT_W + 32} y={-6} braced={false} />
+                <text className="mth-fig-label" x={LEFT + PLOT_W + 122} y={-2}>
+                  {t("figure.pctOfMonth", { pct: Math.round(pWeek[week] * 100) })}
+                </text>
+              </>
+            )}
           </g>
         );
       })}
+
+      {/* after the blend the trip counts are spent; what is left to read is
+          how far each week's share moved, under one heading for the column */}
+      {blended ? (
+        <text className="mth-fig-label" x={LEFT + PLOT_W + 32} y={weekBases[0] - 34}>
+          {t("figure.pctOfMonthHeading")}
+        </text>
+      ) : null}
     </svg>
   );
 }

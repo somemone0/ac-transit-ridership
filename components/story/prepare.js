@@ -225,7 +225,6 @@ export function resolvePlaces(data) {
       lat: 37.78976, lon: -122.39606,
       routes: TRANSBAY_ROUTES.filter((route) => data.routeW.ix.has(route)),
     },
-    rockridge: { label: "Rockridge BART", lat: 37.84469, lon: -122.25186 },
     ucVillage: { label: "UC Village", lat: 37.88428, lon: -122.29889 },
     // The commute passages point at four tracts by number. Their centres come
     // from the tract geometry rather than being written down, so they follow

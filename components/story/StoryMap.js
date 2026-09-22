@@ -239,6 +239,10 @@ function compareRatio(data, level, key, p) {
   return workers > 0 ? home / workers : NaN;
 }
 
+// A share as the explorer's compare legend prints it: a second decimal only
+// where the first would round a small share away.
+const sharePct = (value) => (100 * value).toFixed(value < 0.01 ? 2 : 1);
+
 /* "AC Transit commuters" is that count on the magenta ramp; "Compare" is the
    same count over the tract's LODES employed residents, on the diverging ramp
    centred on the median tract. Both are tract-level, which is as fine as
@@ -557,7 +561,7 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
           load += value;
           imp += value * imputed;
         }
-        if (load <= 0 && corridorView !== "rel") continue;
+        if (load <= 0 && corridorView !== "rel" && !snap) continue;
         let color;
         if (snap) {
           const service = snap.q ? corridorService(data, snap, index) : null;
@@ -567,7 +571,10 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
         }
         if (!color) continue;
         const thickness = Math.min(1, Math.sqrt(load / domain));
-        lines.push({ pts: geometry[index].pts, color, thickness });
+        // As in the explorer, speed colours are classes and a faint one reads
+        // as the wrong class, so they draw near-opaque whatever the load.
+        const opacity = snap ? 0.85 : 0.32 + thickness * 0.35;
+        lines.push({ pts: geometry[index].pts, color, thickness, opacity });
       }
       for (const [region, regionAlpha] of regions) {
         inRegion(region, () => {
@@ -578,7 +585,7 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
           for (const line of lines) {
             context.beginPath();
             tracePath(context, line.pts);
-            context.globalAlpha = (0.32 + line.thickness * 0.35) * regionAlpha * alpha.routes;
+            context.globalAlpha = line.opacity * regionAlpha * alpha.routes;
             context.strokeStyle = line.color;
             context.lineWidth = 1 + line.thickness * 7;
             context.stroke();
@@ -721,10 +728,18 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
       parts.push(`<circle cx="${x}" cy="${y}" r="12" class="ring" />`);
     };
 
+    // A tract is ringed for its share, which is what the passage quotes, so
+    // the figure takes the place of the tract number.
     for (const place of scene.markPlaces || []) {
       const [x, y] = project(place.lat, place.lon);
       ring(x, y);
-      label(x, y, [place.label]);
+      if (place.level === "tract" && scene.commuteMeasure) {
+        const ratio = place.keys.length
+          ? compareRatio(data, "tract", place.keys[0], periodIndex(data, week)) : NaN;
+        if (Number.isFinite(ratio)) label(x, y, [t("storyMap.calloutOfTraffic", { pct: sharePct(ratio) })]);
+      } else {
+        label(x, y, [place.label]);
+      }
     }
 
     const place = scene.calloutPlace;
@@ -788,6 +803,9 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
           ? t("storyMap.calloutOfBaseline", { pct: Math.round(share * 100) })
           : t("storyMap.tipNoBaseline"))}</div>`;
     }
+    // The commute areas are tracts, which the block group tooltip below
+    // would misname and miscount.
+    if (scene.view === "commute") return null;
     if (scene.view === "recovery") {
       const month = recoveryAt(data, "bgroup", hit.key, scene.recThresh);
       const text = month === -2 ? t("storyMap.tipTooLittle")
@@ -853,7 +871,7 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
       }
       week = nextWeek;
       card = nextCard || null;
-      const key = `${scene.view}|${scene.level}|${scene.series}|${scene.focus?.mode}|${week}`;
+      const key = `${scene.view}|${scene.level}|${scene.series}|${scene.focus?.mode}|${scene.commuteMeasure}|${week}`;
       if (key !== hudKey) {
         hudKey = key;
         onHud({ scene, week });
@@ -1023,6 +1041,15 @@ function Hud({ data, scene, week }) {
     const commute = data.commute;
     const period = commute ? commute.meta.periods[periodIndex(data, week)] : null;
     const [year, month] = (period?.id || "2026-02").split("-").map(Number);
+    if (scene.commuteMeasure && period) {
+      return (
+        <>
+          <div className="story-hud-kicker">{t("storyMap.commuteKicker")}</div>
+          <div className="story-hud-title">{t("storyMap.commuteTitle", { month: fullM(month), year })}</div>
+          <CommuteMeasureLegend data={data} measure={scene.commuteMeasure} p={periodIndex(data, week)} />
+        </>
+      );
+    }
     return (
       <>
         <div className="story-hud-kicker">{t("storyMap.commuteKicker")}</div>
@@ -1107,6 +1134,45 @@ function Hud({ data, scene, week }) {
       <Ramp colors={DIVERGING_RG} labels={strings.storyMap.ridershipRamp} />
       {scene.level === "group" ? <DotScale data={data} /> : null}
       <CityComparison data={data} week={week} basis={scene.compare} />
+    </>
+  );
+}
+
+/* The tract measures' key, worded as the explorer's legend words the same
+   two modes, so a reader who follows the link finds the same key there. */
+function CommuteMeasureLegend({ data, measure, p }) {
+  const commute = data.commute;
+  if (measure === "acHome") {
+    return (
+      <>
+        <Ramp colors={SEQ_MAGENTA}
+          labels={["0", t("explorer.legendPlus", { pct: fmt(commuteRtDomain(commute, "tract", p, "home")) })]} />
+        <p className="story-hud-note subtle">
+          {t(commute.rt ? "explorer.hintCommuteRoundTrip" : "explorer.hintCommuteDepartures",
+            { min: COMMUTE_MIN })}
+        </p>
+      </>
+    );
+  }
+  if (!data.lodes) return null;
+  const median = compareMedian(data, "tract", p);
+  const percent = (value) => t("numbers.percentFlat", { n: sharePct(value) });
+  return (
+    <>
+      <Ramp colors={DIVERGING} labels={[
+        t("explorer.legendOrLess", { pct: percent(median / 4) }),
+        percent(median),
+        t("explorer.legendPlus", { pct: percent(median * 4) }),
+      ]} />
+      <p className="story-hud-note subtle">
+        {t("explorer.hintCompare", {
+          a: t("explorer.cellAcHome"),
+          b: t("explorer.cellAllHome"),
+          year: lodesYearFor(data.lodes, commute.meta.periods[p].id),
+          pct: percent(median),
+          min: COMMUTE_MIN,
+        })}
+      </p>
     </>
   );
 }
