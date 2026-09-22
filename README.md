@@ -67,9 +67,6 @@ binary bundle the browser can page through without a server round trip.
   average bus speed on the streets in the box (across) and average riders per
   week at its stops (up), joined in time order, with the whole period's average
   speed.
-- **Bus lanes** (`/buslanes`) — bus lanes added in the service area since 2019
-  with a sourced start date, and average bus speed on each in the 12 months
-  before and after, beside the network's change over the same months.
 - **Median household income** by tract and block group (ACS 5-year, 2024,
   table B19013) as an overlay.
 - **Methodology** (`/methodology`) — how every figure is produced, in the
@@ -178,10 +175,8 @@ checkout that has them, or set `ACPRA_REPLICATE` and `ACPRA_VIS` individually.
 builds `cities.json` + `cities.geojson` (Census places), and
 `scripts/build_service_pack.py` builds the monthly service files (speeds and headways from the raw APC
 months); `scripts/build_speed_pack.py` folds them into one all-day speed per
-corridor per month (`speed_meta.json`, `speed_<era>.<hash>.u16`), and
-`scripts/build_buslanes_pack.py` builds `buslanes.json` from those and an
-OpenStreetMap bus-lane extract. `scripts/build_lodes_pack.py`
-builds `lodes.json` (no sibling dependencies, only census.gov access). For
+corridor per month (`speed_meta.json`, `speed_<era>.<hash>.u16`).
+`scripts/build_lodes_pack.py` builds `lodes.json` (no sibling dependencies, only census.gov access). For
 deployment both need uploading to the pack bucket and a line in its
 `manifest.json`.
 

@@ -209,9 +209,8 @@ gcloud storage cp service_meta.json gs://ac-transit-ridership-pack/pack/ \
 ### After rebuilding the service months
 
 Run `python3 scripts/build_speed_pack.py` (monthly all-day speed per corridor,
-used by the selection chart) and then `python3 scripts/build_buslanes_pack.py`
-(the /buslanes page). Upload the new `speed_<era>.<hash>.u16` files first and
-`speed_meta.json` and `buslanes.json` after, like the other hashed bundles.
+used by the selection chart). Upload the new `speed_<era>.<hash>.u16` files
+first and `speed_meta.json` after, like the other hashed bundles.
 
 ### After rebuilding the corridors
 

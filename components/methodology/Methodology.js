@@ -247,8 +247,7 @@ export default function Methodology() {
         <p className="mth-kicker">{t("methodology.kicker")}</p>
         <p className="mth-links">
           <a href="/">{t("methodology.linkExplore")}</a> ·{" "}
-          <a href="/story">{t("methodology.linkStory")}</a> ·{" "}
-          <a href="/buslanes">{t("methodology.linkBusLanes")}</a>
+          <a href="/story">{t("methodology.linkStory")}</a>
         </p>
       </header>
 
