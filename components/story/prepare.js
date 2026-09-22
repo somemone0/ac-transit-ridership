@@ -227,5 +227,41 @@ export function resolvePlaces(data) {
     },
     rockridge: { label: "Rockridge BART", lat: 37.84469, lon: -122.25186 },
     ucVillage: { label: "UC Village", lat: 37.88428, lon: -122.29889 },
+    // The commute passages point at four tracts by number. Their centres come
+    // from the tract geometry rather than being written down, so they follow
+    // a boundary revision instead of drifting off it.
+    tract4238: tract(data, "4238"),
+    tract4235: tract(data, "4235"),
+    tract4425: tract(data, "4425.02"),
+    tract4403: tract(data, "4403.01"),
+  };
+}
+
+// A named Census tract as a place the story can ring and label. Census writes
+// the suffix padded ("4425.02"); the label drops the padding, the way the
+// copy says it out loud.
+function tract(data, name) {
+  const feature = (data.geo?.tracts?.features || [])
+    .find((f) => f.properties?.name === `Census Tract ${name}`);
+  const label = `Tract ${name.replace(/\.0*(\d)/, ".$1")}`;
+  if (!feature) return { label, lat: 0, lon: 0, missing: true };
+  const polygons = feature.geometry.type === "Polygon"
+    ? [feature.geometry.coordinates]
+    : feature.geometry.coordinates;
+  let latSum = 0;
+  let lonSum = 0;
+  let count = 0;
+  for (const [lon, lat] of polygons[0][0]) {
+    lonSum += lon;
+    latSum += lat;
+    count += 1;
+  }
+  const key = data.meta.tracts.indexOf(feature.properties.geoid);
+  return {
+    label,
+    lat: latSum / count,
+    lon: lonSum / count,
+    level: "tract",
+    keys: key >= 0 ? [key] : [],
   };
 }

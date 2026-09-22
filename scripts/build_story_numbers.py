@@ -174,7 +174,8 @@ snapshots = svc["snapshots"]
 poly = boundary()
 
 speeds = {}
-for label, month in (("feb2020", "2020-02"), ("dec2020", "2020-12"), ("feb2026", "2026-02")):
+for label, month in (("feb2020", "2020-02"), ("dec2020", "2020-12"),
+                     ("sep2025", "2025-09"), ("feb2026", "2026-02")):
     snap, raw = service_month(snapshots, month)
     LENGTHS, centroids = corridor_geometry(snap["era"])
     mask = np.array([inside(poly, lat, lon) for lat, lon in centroids])
@@ -191,8 +192,10 @@ for key, value in speeds.items():
         if value[p] is not None:
             value[p] = {q: round(mph, 1) for q, mph in value[p].items()}
 out["speeds"] = speeds
-# The night/peak gap is quoted from the middle of each distribution.
-night, peak = speeds["feb2026"]["night"]["p50"], speeds["feb2026"]["peak"]["p50"]
+# The night/peak gap is quoted from the middle of each distribution, in the
+# month the traffic section ends on -- the figure has to describe the map the
+# reader is looking at when the sentence appears.
+night, peak = speeds["sep2025"]["night"]["p50"], speeds["sep2025"]["peak"]["p50"]
 out["speeds"]["night_vs_peak_pct"] = round(100 * (night - peak) / peak, 1)
 
 OUT.write_text(json.dumps(out, indent=2) + "\n")

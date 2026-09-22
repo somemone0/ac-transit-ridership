@@ -307,7 +307,20 @@ function weightedQuantiles(samples, ps) {
 const SPEED_PS = [0.1, 0.5, 0.9];
 // Fixed so the sparkline is comparable week to week; widened from the old
 // average-only [6, 16] to hold both tails.
-const SPEED_DOMAIN = [4, 20];
+// A series as a share of its own value in the baseline week, so a quantity in
+// mph and a quantity in riders can be read on one axis against Feb. 2020.
+function relativeToBase(series, base) {
+  const level = series[base];
+  const out = new Float32Array(series.length);
+  if (!Number.isFinite(level) || level <= 0) {
+    out.fill(NaN);
+    return out;
+  }
+  for (let i = 0; i < series.length; i += 1) {
+    out[i] = Number.isFinite(series[i]) ? series[i] / level : NaN;
+  }
+  return out;
+}
 
 function berkeleySpeedSeries(data, prep, period = "day") {
   return cached(data, `speed|${period}`, () => {
@@ -863,7 +876,8 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
   };
 }
 
-function Sparkline({ series, week, meta, domain = null, reference = 1, band = null }) {
+function Sparkline({ series, week, meta, domain = null, reference = 1, band = null,
+  compare = null }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -945,6 +959,20 @@ function Sparkline({ series, week, meta, domain = null, reference = 1, band = nu
       context.globalAlpha = 1;
     }
 
+    // A second quantity on the same indexed axis, dashed so it cannot be
+    // mistaken for the series the section is about.
+    if (compare) {
+      context.setLineDash([3, 2]);
+      context.lineWidth = 1.3;
+      context.strokeStyle = accent;
+      context.globalAlpha = 0.35;
+      trace(compare, week, compare.length - 1);
+      context.globalAlpha = 0.85;
+      trace(compare, 0, week);
+      context.setLineDash([]);
+      context.globalAlpha = 1;
+    }
+
     context.lineWidth = 1.2;
     context.strokeStyle = muted;
     context.globalAlpha = 0.5;
@@ -972,7 +1000,7 @@ function Sparkline({ series, week, meta, domain = null, reference = 1, band = nu
       context.textAlign = "center";
       context.fillText("100%", Math.min(width - 16, Math.max(16, width / 2)), y(1) - 1);
     }
-  }, [series, week, meta, domain, reference, band]);
+  }, [series, week, meta, domain, reference, band, compare]);
   return <canvas ref={canvasRef} className="story-spark" height="58" />;
 }
 
@@ -1030,18 +1058,22 @@ function Hud({ data, scene, week }) {
     const speeds = berkeleySpeedSeries(data, prep, scene.period || "day");
     const ridership = prep.series.berkeley;
     const mph = (value) => (Number.isFinite(value) ? value.toFixed(1) : t("numbers.missing"));
+    // Speed and ridership are different units, so the chart shows each against
+    // its own February 2020 level. That is the comparison the passage makes --
+    // speed held up where ridership did not -- and it is only readable if both
+    // start from the same place.
+    const speedRel = relativeToBase(speeds.p50, data.BASE);
     return (
       <>
         <div className="story-hud-kicker">{t("storyMap.weekOf")}</div>
         <div className="story-hud-title">{apDate(meta.weeks[week])}</div>
         <Sparkline
-          series={speeds.p50}
-          band={[speeds.p10, speeds.p90]}
+          series={speedRel}
+          compare={ridership}
           week={week}
           meta={meta}
-          domain={SPEED_DOMAIN}
-          reference={null}
         />
+        <p className="story-hud-note subtle">{t("storyMap.speedChartKey")}</p>
         <p className="story-hud-note">
           <T id="storyMap.speedNote" c={[<b />]} vars={{ mph: mph(speeds.p50[week]) }} />
           {Number.isFinite(ridership[week])

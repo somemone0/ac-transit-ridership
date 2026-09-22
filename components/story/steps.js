@@ -20,6 +20,7 @@ export const WEEKS = {
   aug2023: "2023-08-28",
   dec2020: "2020-12-07",
   sep2021: "2021-09-13",
+  sep2025: "2025-09-15",
   feb2026: "2026-02-09",
 };
 
@@ -173,12 +174,12 @@ export const MAP_TWO = [
   },
   {
     id: "compare",
-    scene: { commuteMeasure: "compare" },
+    scene: { commuteMeasure: "compare", marks: ["tract4238", "tract4235"] },
     text: [t("story.two.compare")],
   },
   {
     id: "south-east-bay",
-    scene: { bounds: "southEastBay" },
+    scene: { bounds: "southEastBay", marks: ["tract4425", "tract4403"] },
     text: [t("story.two.southEastBay"), t("story.two.southEastBayHint")],
     link: { href: "/", label: t("story.seeData") },
   },
@@ -204,22 +205,12 @@ export const MAP_THREE = [
     id: "pandemic-traffic",
     scrub: true,
     scene: { week: "dec2020" },
-    text: [t("story.three.pandemicTraffic", {
-      base50: speeds.feb2020.day.p50, dec50: speeds.dec2020.day.p50,
-      base10: speeds.feb2020.day.p10, dec10: speeds.dec2020.day.p10,
-      base90: speeds.feb2020.day.p90, dec90: speeds.dec2020.day.p90,
-    })],
-  },
-  {
-    id: "same-pattern",
-    scrub: true,
-    scene: { week: "sep2021" },
-    text: [t("story.three.samePattern")],
+    text: [t("story.three.pandemicTraffic")],
   },
   {
     id: "time-of-day",
     scrub: true,
-    scene: { week: "feb2026" },
+    scene: { week: "sep2025" },
     text: [t("story.three.timeOfDay", { pct: speeds.night_vs_peak_pct }),
       t("story.three.timeOfDayHint")],
     link: { href: "/", label: t("story.seeData") },
