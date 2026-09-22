@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { HourlyChart, SelectionChart, SeriesChart } from "./Charts";
+import RidershipSpeedChart from "./RidershipSpeedChart";
 import {
   DIVERGING,
   DIVERGING_RG,
@@ -13,27 +14,59 @@ import {
   SEQ_MAGENTA,
   colorFor,
   commuteDomain,
+  COMMUTE_MIN,
+  divT,
+  seqT,
   commuteHourly,
   commuteODLists,
+  commuteRt,
+  commuteRtDomain,
+  commuteRtTotals,
   commuteRegionLists,
   commuteStats,
   corridorColor,
   corridorDomain,
+  corridorLatLngs,
   corridorStats,
+  corridorService,
+  commuteOdLookahead,
+  createPrefetcher,
+  displaySnapshot,
+  ensureData,
   eraForWeek,
+  eraLookahead,
   escapeHtml,
   fmt,
+  formatHeadway,
+  formatMph,
+  HEADWAY_BREAKS,
+  HEADWAY_COLORS,
+  headwayColor,
+  isServiceView,
+  NO_SERVICE,
+  periodHours,
+  routeService,
+  serviceLookahead,
+  serviceSnapshot,
+  SPEED_BREAKS,
+  SPEED_COLORS,
+  speedColor,
   imputedAt,
   incomeAt,
   incomeDomain,
+  isPending,
+  lodesArrivals,
+  lodesAt,
+  lodesYearFor,
   loadCommuteOD,
   loadVisualizationData,
   nodeFlow,
   ramp,
   rawAt,
-  routeBoardings,
+  regionSpeed,
+  routeBoardingsSeries,
   routeOwnSeries,
-  routeStreetSeries,
+  routeStreetBoardingsSeries,
   routesFor,
   sectionLoad,
   selectionSeries,
@@ -88,7 +121,7 @@ function StatRows({ data, level, keyIndex, week }) {
       <Row label="Boardings">
         <DisclosureValue real={boardReal} imp={boardImp} />
       </Row>
-      <Row label="Alightings">
+      <Row label="Drop-offs">
         <DisclosureValue real={alightReal} imp={alightImp} />
       </Row>
       <Row label="Ridership">
@@ -100,7 +133,32 @@ function StatRows({ data, level, keyIndex, week }) {
   );
 }
 
-function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx }) {
+function CommuteCellRows({ data, level, keyIndex, periodIdx, cells }) {
+  if (!data.commute) return null;
+  const usable = cells.filter((cell) => !cellIsTractOnly(cell) || level === "tract");
+  if (!usable.length) return null;
+  const ratio = commuteCellRatio(data, level, keyIndex, periodIdx, usable);
+  return (
+    <>
+      <h4>Commuters · {data.commute.meta.periods[periodIdx].label}</h4>
+      <div style={{ marginBottom: 6 }}>
+        {usable.map((cell) => {
+          const value = cellValue(data, level, keyIndex, periodIdx, cell);
+          return (
+            <Row key={cell} label={COMMUTE_CELLS[cell].label}>
+              {value === null ? "-" : fmt(value)}
+            </Row>
+          );
+        })}
+        {Number.isFinite(ratio) ? (
+          <Row label="AC Transit ÷ all commuters">{`${(100 * ratio).toFixed(1)}%`}</Row>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, commuteCells }) {
   const { meta } = data;
   const { lv: level, key: keyIndex } = detail;
   const group = meta.stop_groups;
@@ -117,6 +175,13 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx }) {
       </div>
       <h4>Weekly ridership 2019-2026</h4>
       <SeriesChart series={series} meta={meta} />
+      <CommuteCellRows
+        data={data}
+        level={level}
+        keyIndex={keyIndex}
+        periodIdx={periodIdx}
+        cells={commuteCells}
+      />
       <CommutePanel
         data={data}
         commute={commute}
@@ -164,35 +229,48 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx }) {
   );
 }
 
-function getCachedRouteSeries(data, route) {
+function getCachedRouteLoad(data, route) {
   if (!data.routeSeriesCache) data.routeSeriesCache = {};
+  // A route's series spans every era; until they are all loaded it is
+  // partial, so it is recomputed rather than cached.
+  const complete = Object.keys(data.corridors).length === Object.keys(data.meta.sections).length;
+  if (!complete) return routeOwnSeries(data, route);
   if (!data.routeSeriesCache[route]) {
-    data.routeSeriesCache[route] = {
-      own: routeOwnSeries(data, route),
-      street: routeStreetSeries(data, route),
-    };
+    data.routeSeriesCache[route] = routeOwnSeries(data, route);
   }
   return data.routeSeriesCache[route];
 }
 
+function getCachedRouteBoardings(data, route) {
+  if (!data.routeBoardingsCache) data.routeBoardingsCache = {};
+  const complete = Object.keys(data.corridors).length === Object.keys(data.meta.sections).length;
+  if (!complete) {
+    return {
+      own: routeBoardingsSeries(data, route),
+      street: routeStreetBoardingsSeries(data, route),
+    };
+  }
+  if (!data.routeBoardingsCache[route]) {
+    data.routeBoardingsCache[route] = {
+      own: routeBoardingsSeries(data, route),
+      street: routeStreetBoardingsSeries(data, route),
+    };
+  }
+  return data.routeBoardingsCache[route];
+}
+
 function RouteDetail({ data, route, week, routeMode, onModeChange, commute, periodIdx }) {
   const { meta } = data;
-  const cached = getCachedRouteSeries(data, route);
-  const own = cached.own;
-  const street = cached.street;
-  const series = routeMode === "own" ? own : street;
-  const eras = own.eras.length ? own.eras : street.eras;
-  const currentLoad = series.real[week] + series.imp[week];
-  const streetLoad = street.real[week] + street.imp[week];
-  const boardings = routeBoardings(data, route, week);
+  const ownLoad = getCachedRouteLoad(data, route);
+  const cached = getCachedRouteBoardings(data, route);
+  const ownBoardings = cached.own;
+  const streetBoardings = cached.street;
+  const series = routeMode === "own" ? ownBoardings : streetBoardings;
+  const current = series.real[week] + series.imp[week];
+  const ownCurrent = ownBoardings.real[week] + ownBoardings.imp[week];
+  const ownLoadCurrent = ownLoad.real[week] + ownLoad.imp[week];
+  const streetCurrent = streetBoardings.real[week] + streetBoardings.imp[week];
   const isScheduleOnly = (meta.sched_only_routes || []).includes(route);
-  const directionsByEra = {};
-  for (const era of street.eras) directionsByEra[era.era] = era.dirs;
-  const directionText = (directions) =>
-    directions
-      .map((direction) => direction === "0" ? "outbound" : "inbound")
-      .sort()
-      .join(" + ") || "-";
 
   return (
     <>
@@ -213,29 +291,27 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
         </button>
       </div>
       <div style={{ marginBottom: 6 }}>
-        <Row label={`Onboard load / wk, week of ${meta.weeks[week]}`}>
+        <Row label={`Boardings / wk, week of ${meta.weeks[week]}`}>
           <DisclosureValue real={series.real[week]} imp={series.imp[week]} />
         </Row>
         <Row label="Imputed">
-          {currentLoad > 0 ? `${(100 * series.imp[week] / currentLoad).toFixed(1)}%` : "-"}
+          {current > 0 ? `${(100 * series.imp[week] / current).toFixed(1)}%` : "-"}
         </Row>
-        <Row label="Share of street total">
-          {streetLoad > 0 ? `${(100 * (own.real[week] + own.imp[week]) / streetLoad).toFixed(0)}%` : "-"}
+        <Row label="Share of street boardings">
+          {streetCurrent > 0 ? `${(100 * ownCurrent / streetCurrent).toFixed(0)}%` : "-"}
         </Row>
-        {boardings ? (
-          <>
-            <Row label="Boardings / wk">
-              <DisclosureValue real={boardings.real} imp={boardings.imp} />
-            </Row>
-            <Row label="Sections per rider">
-              {boardings.real + boardings.imp > 0 && !isScheduleOnly
-                ? ((own.real[week] + own.imp[week]) / (boardings.real + boardings.imp)).toFixed(1)
-                : "-"}
-            </Row>
-          </>
-        ) : null}
+        <Row label="Sections per rider">
+          {ownCurrent > 0 && !isScheduleOnly
+            ? (ownLoadCurrent / ownCurrent).toFixed(1)
+            : "-"}
+        </Row>
       </div>
-      <h4>Weekly onboard load (person-segments) 2019-2026</h4>
+      <RouteServiceTable data={data} route={route} week={week} />
+      <h4>
+        {routeMode === "own"
+          ? "Weekly boardings on this route, 2019-2026"
+          : "Weekly boardings on the lines using its streets, 2019-2026"}
+      </h4>
       <SeriesChart series={series} meta={meta} />
       <CommutePanel
         data={data}
@@ -246,34 +322,55 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
       />
       {isScheduleOnly ? (
         <p className="hint schedule-warning">
-          This line has no APC coverage, so its load profile is reconstructed and <b>not reliable</b>.
-          Section load is cumulative boardings minus alightings, but the reconstruction spreads
-          alightings by an unordered share vector, so the profile never builds. Use the boardings figure instead.
+          None of this line’s buses had a working passenger counter, so the figures above are estimated
+          from its schedule and from how riders used the stops of the lines it replaced. How full the bus is along the route is <b>not
+          reliable</b> here; the weekly boardings are the better guide.
         </p>
       ) : null}
       <p className="hint">
         {routeMode === "own"
-          ? `Sum of onboard load over this route's own ${eras.reduce((sum, era) => sum + era.nsec, 0)} stop-to-stop sections - no apportionment. This is not a headcount: it integrates each rider over every section they ride, so it exceeds boardings by the average trip length shown above.`
-          : "Total load on every line using these streets, this route included. Answers how busy is this corridor, not how busy is this line."} Zero weeks = no geometry in that signup.
+          ? "Boardings per week on this route, each rider counted once per trip. The same rider changing buses counts again."
+          : "Boardings per week on every line that uses the same streets as this route, this route included. It shows how busy the streets are, not this line alone."}
       </p>
-      <h4>Geometry by signup</h4>
-      {eras.length ? (
-        eras.map((era) => (
-          <div className="row" key={era.era}>
-            <span className="k">{era.era}</span>
-            <span>
-              {era.nsec} section{era.nsec === 1 ? "" : "s"} · {directionText(directionsByEra[era.era] || [])}
-            </span>
-          </div>
-        ))
-      ) : (
-        <p className="hint">No corridor geometry for this route.</p>
-      )}
     </>
   );
 }
 
-function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange, onClose, commute, periodIdx }) {
+/* Observed headway, trips and speed for each service period, from the bus
+   counters in the snapshot month the time bar sits in. */
+function RouteServiceTable({ data, route, week }) {
+  const snap = displaySnapshot(data, week);
+  const service = snap?.routes ? routeService(snap, route) : null;
+  if (!service) return null;
+  return (
+    <>
+      <h4>Level of service · {snap.label}</h4>
+      <table className="service-table">
+        <thead>
+          <tr><th /><th>Headway</th><th>Trips</th><th>Speed</th></tr>
+        </thead>
+        <tbody>
+          {snap.periods.map((period, index, snapPeriods) => (
+            <tr key={period.id} title={periodHours(period, snapPeriods)}>
+              <td className="k">{period.label}</td>
+              <td>{period.windows.length ? formatHeadway(service.headway[index]) : "-"}</td>
+              <td>{period.windows.length ? fmt(service.trips[index]) : "-"}</td>
+              <td>{period.windows.length ? formatMph(service.mph[index]) : "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="hint">
+        From the bus counters. Trips are the distinct scheduled starts seen that month, both
+        directions (weekend: Saturday and Sunday averaged); headway is the hours the line
+        runs in the period over its trips per direction. Speed includes dwell. Hover a row
+        for its hours.
+      </p>
+    </>
+  );
+}
+
+function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange, onClose, commute, periodIdx, commuteCells }) {
   return (
     <aside id="detailPanel">
       <div className="cp-head">
@@ -300,13 +397,57 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
           onRouteClick={onRouteClick}
           commute={commute}
           periodIdx={periodIdx}
+          commuteCells={commuteCells}
         />
       )}
     </aside>
   );
 }
 
-function Legend({ data, view, level, recThresh, commute, commuteMode, period, commuteFocus, commuteFocusMode, focusMax }) {
+function ServiceLegend({ data, view, servicePeriod, week }) {
+  const snap = displaySnapshot(data, week);
+  const target = serviceSnapshot(data, week);
+  if (!snap) return <p className="hint">No counter snapshot covers this week's corridors.</p>;
+  const period = snap.periods[servicePeriod];
+  const snapPeriods = snap.periods;
+  const los = view === "los";
+  const breaks = los ? HEADWAY_BREAKS : SPEED_BREAKS;
+  const colors = los ? HEADWAY_COLORS : SPEED_COLORS;
+  const unit = los ? "min" : "mph";
+  return (
+    <>
+      {breaks.map((limit, index) => {
+        const lower = index === 0 ? null : breaks[index - 1];
+        const label = lower === null
+          ? `under ${limit} ${unit}`
+          : limit === Infinity ? `${lower}+ ${unit}` : `${lower}-${limit} ${unit}`;
+        return (
+          <div className="legend-swatch" key={limit}>
+            <span style={{ background: colors[index] }} />
+            <span>{label}</span>
+          </div>
+        );
+      })}
+      {los ? (
+        <div className="legend-swatch"><span style={{ background: NO_SERVICE }} /><span>no trips in this period</span></div>
+      ) : null}
+      {target && snap !== target ? (
+        <p className="hint">Showing {snap.label} while {target.label} loads.</p>
+      ) : null}
+      <p className="hint">
+        {period.label}, {snap.label}: {period.days === "weekend" ? "Sat & Sun" : "Mon-Fri"}{" "}
+        {periodHours(period, snapPeriods)}. The hours come from the {snap.era} GTFS schedule:
+        where its buses-in-service profile steps up and down.{" "}
+        {los
+          ? "Corridor headway counts every line on the street: the hours it runs over its trips per direction, averaged over the directions served."
+          : "Average speed between stop groups from door-open times, dwell included, weighted by trips."}{" "}
+        From the bus counters; width encodes onboard load.
+      </p>
+    </>
+  );
+}
+
+function Legend({ data, view, level, recThresh, commute, commuteCells, period, commuteFocus, commuteFocusMode, focusMax, servicePeriod, week }) {
   if (!data) return null;
   const { meta } = data;
   const bar = (colors) => (
@@ -318,8 +459,14 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
     <div className="legend-labels"><span>{left}</span><span>{right}</span></div>
   );
 
+  if (isServiceView(view)) {
+    return <ServiceLegend data={data} view={view} servicePeriod={servicePeriod} week={week} />;
+  }
+  if (level !== "none" && !data.store[level]) {
+    return <p className="hint">Loading this level...</p>;
+  }
   if (level === "none") {
-    return <p className="hint">Areas hidden. Corridor width and colour show onboard load; hover any corridor for its routes.</p>;
+    return <p className="hint">Streets only. Wider, darker lines carry more riders; hover a street for the routes on it.</p>;
   }
   if (view === "income") {
     const [lo, hi] = incomeDomain(data);
@@ -358,20 +505,53 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
         </>
       );
     }
-    if (commuteMode === "peaks") {
+    const single = commuteCells.length === 1;
+    const missing = commuteCells.filter(
+      (cell) => cellIsTractOnly(cell) && (level !== "tract" || !data.lodes),
+    );
+    if (missing.length) {
+      return (
+        <p className="hint">
+          {COMMUTE_CELLS[missing[0]].label} needs <code>lodes.json</code> at tract level,
+          which this bundle does not carry — run scripts/build_lodes_pack.py and sync
+          the pack.
+        </p>
+      );
+    }
+    const year = lodesYear(data, data.commute.meta.periods.indexOf(period));
+    const names = orderCells(commuteCells).map((cell) => COMMUTE_CELLS[cell].label);
+    const roundTrip = !!data.commute.rt;
+    if (single) {
+      const cell = commuteCells[0];
       return (
         <>
-          {bar(SEQ_BLUE)}
-          {labels("flat all day", "sharp AM+PM peaks")}
-          <p className="hint">Peak-hour riding vs the daytime average — which places have commuting peaks. Size still encodes volume.</p>
+          {bar(SEQ_MAGENTA)}
+          {labels("0", `${fmt(cellDomain(data, level, data.commute.meta.periods.indexOf(period), cell))}+`)}
+          <p className="hint">
+            {COMMUTE_CELLS[cell].src === "all"
+              ? `Employed residents living in each tract, Census LODES ${year}.`
+              : roundTrip
+                ? `Estimated AC Transit commuters living in each place on an average weekday: morning riders whose trip is repeated in reverse that evening. Grey: under ${COMMUTE_MIN} riders per weekday.`
+                : `Morning departures on an average weekday. Grey: under ${COMMUTE_MIN} riders per weekday.`}
+          </p>
         </>
       );
     }
+    const median = compareMedian(data, level, data.commute.meta.periods.indexOf(period));
+    const percent = (value) => `${(100 * value).toFixed(value < 0.01 ? 2 : 1)}%`;
     return (
       <>
         {bar(DIVERGING)}
-        {labels("homes (leave AM)", "workplaces (arrive AM)")}
-        <p className="hint">Morning balance of boardings vs alightings, {period.label} average weekday. Grey: too little service to judge. Click any place to recolour the map by inferred riders {commuteFocusMode === "from" ? "from" : "to"} it.</p>
+        <div className="legend-labels">
+          <span>{percent(median / 4)} or less</span>
+          <span>{percent(median)}</span>
+          <span>{percent(median * 4)}+</span>
+        </div>
+        <p className="hint">
+          {names[0]} ÷ {names[1]} living in each tract (LODES {year}). White is the median tract,{" "}
+          {percent(median)}; red tracts have a higher share, blue a lower one. Grey: under {COMMUTE_MIN}{" "}
+          riders per weekday, or no workers to divide by.
+        </p>
       </>
     );
   }
@@ -380,7 +560,7 @@ function Legend({ data, view, level, recThresh, commute, commuteMode, period, co
       <>
         {bar(SEQ_BLUE)}
         {labels("0", `${fmt(data.domains[level])}+ / wk`)}
-        <p className="hint">Boardings + alightings per week. Circle size also encodes volume.</p>
+        <p className="hint">Boardings plus drop-offs per week. Larger circles mean more riders.</p>
       </>
     );
   }
@@ -483,7 +663,9 @@ function RouteSearch({ data, week, onPick }) {
 }
 
 function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
-  const series = selectionSeries(data, selection);
+  const [tab, setTab] = useState(data.speed ? "speed" : "riders");
+  const series = selectionSeries(data, selection.keys);
+  const speed = regionSpeed(data, selection.bounds);
   const exportPng = () => {
     if (!canvasRef.current) return;
     const link = document.createElement("a");
@@ -494,13 +676,48 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
   return (
     <div id="chartPanel">
       <div className="cp-head">
-        <span id="cpTitle">{selection.length} stop group{selection.length === 1 ? "" : "s"} selected</span>
+        <span id="cpTitle">{selection.keys.length} stop group{selection.keys.length === 1 ? "" : "s"} selected</span>
         <span className="cp-actions">
-          <button className="btn small" type="button" onClick={exportPng}>Export PNG</button>
+          {tab === "riders" ? <button className="btn small" type="button" onClick={exportPng}>Export PNG</button> : null}
           <button className="btn small ghost" type="button" aria-label="Close chart" onClick={onClear}>X</button>
         </span>
       </div>
-      <SelectionChart series={series} meta={data.meta} canvasRef={canvasRef} />
+      {data.speed && selection.bounds ? (
+        <div className="seg">
+          {[["speed", "Riders and bus speed"], ["riders", "Observed vs. estimated"]].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`segbtn${tab === value ? " on" : ""}`}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {tab === "speed" && selection.bounds ? (
+        <>
+          <p className="rs-stat">
+            Average bus speed, 2019–2026:{" "}
+            <b>{speed?.average ? `${speed.average.toFixed(1)} mph` : speed ? "no bus data here" : "loading…"}</b>
+          </p>
+          <RidershipSpeedChart
+            series={series}
+            speed={speed}
+            meta={data.meta}
+            mapChanges={Object.values(data.speed.meta.eras).slice(1).map((era) => era.months[0])}
+          />
+          <p className="hint rs-caption">
+            Each dot is a month: average bus speed on every street inside the box (from the bus counters, including
+            time at stops and lights) against average weekly boardings and drop-offs at the selected stops. Ringed
+            dots are the two months the street map was updated (January 2022, April 2025); part of any jump there
+            comes from that change, not from traffic.
+          </p>
+        </>
+      ) : (
+        <SelectionChart series={series} meta={data.meta} canvasRef={canvasRef} />
+      )}
     </div>
   );
 }
@@ -524,7 +741,7 @@ function statHtml(data, level, keyIndex, week) {
   const imputed = boardImp + alightImp;
   const baseline = totalAt(data, level, keyIndex, data.BASE);
   return `<div class="row"><span class="k">Boardings</span><span>${discloseHtml(boardReal, boardImp)}</span></div>
-    <div class="row"><span class="k">Alightings</span><span>${discloseHtml(alightReal, alightImp)}</span></div>
+    <div class="row"><span class="k">Drop-offs</span><span>${discloseHtml(alightReal, alightImp)}</span></div>
     <div class="row"><span class="k">Ridership</span><span>${discloseHtml(boardReal + alightReal, imputed)}</span></div>
     <div class="row"><span class="k">Imputed</span><span>${total > 0 ? `${(100 * imputed / total).toFixed(1)}%` : "-"}</span></div>
     <div class="row"><span class="k">vs Feb 2020</span><span>${baseline > 0 ? `${(100 * total / baseline).toFixed(0)}%` : "-"}</span></div>
@@ -559,10 +776,10 @@ function areaStyle(state, level, index) {
         }
       } else {
         color = commuteValue(
-          state.commute,
+          state.data,
           level,
           index,
-          state.commuteMode,
+          state.commuteCells,
           state.commutePeriodIdx,
         ).color;
       }
@@ -620,7 +837,7 @@ function renderDataLayer(api, data, options) {
           weight: 1,
         })
           .bindTooltip(() => (api.renderState.view === "commute" && api.renderState.commute
-            ? commuteTipHtml(data, "group", index, groups.name[index], api.renderState.commutePeriodIdx)
+            ? commuteTipHtml(data, "group", index, groups.name[index], api.renderState.commutePeriodIdx, api.renderState.commuteCells)
             : groupTipHtml(data, index, api.renderState.week)), { sticky: true })
           .on("click", () => api.renderState.callbacks.onMapClick("group", index, groups.name[index]));
         api.groupMarkers.push(marker);
@@ -659,12 +876,14 @@ function renderDataLayer(api, data, options) {
             color = flow ? ramp(SEQ_GREEN, Math.sqrt(flow / focusMax)) : null;
           }
         } else {
-          const result = commuteValue(commute, "group", index, options.commuteMode, options.commutePeriodIdx);
+          const result = commuteValue(data, "group", index, options.commuteCells, options.commutePeriodIdx);
           value = result.value;
           color = result.color;
         }
       } else {
-        value = totalAt(data, "group", index, week);
+        // Recovery time does not depend on the week, so its dots are sized by
+        // Feb 2020 ridership and stay put while the time bar moves.
+        value = totalAt(data, "group", index, view === "recovery" ? data.BASE : week);
         color = colorFor(data, "group", index, week, view, recThresh);
       }
       const visible = value > 0 && !!(color || edge.color);
@@ -682,11 +901,22 @@ function renderDataLayer(api, data, options) {
     return;
   }
 
-  const source = level === "tract" ? "tracts" : "blockgroups";
+  const source = { tract: "tracts", bgroup: "blockgroups", city: "cities" }[level];
+  // Not fetched yet: clear the old level rather than colour this one's
+  // shapes with nothing. The layer is drawn once the load triggers a render.
+  if (!data.geo[source] || !data.store[level]) {
+    if (api.dataMode !== "loading") {
+      dataLayer.clearLayers();
+      api.dataMode = "loading";
+    }
+    return;
+  }
   if (!api.geoLayers) api.geoLayers = {};
   if (!api.geoIndexes) api.geoIndexes = {};
   if (!api.geoLayers[level]) {
-    const ids = level === "tract" ? data.meta.tracts : data.meta.bgroups;
+    const ids = level === "tract" ? data.meta.tracts
+      : level === "bgroup" ? data.meta.bgroups
+        : data.cities.places.map((place) => place.geoid);
     const index = new Map(ids.map((id, index) => [String(id), index]));
     api.geoIndexes[level] = index;
     api.geoLayers[level] = L.geoJSON(data.geo[source], {
@@ -706,6 +936,7 @@ function renderDataLayer(api, data, options) {
               featureIndex,
               feature.properties?.name || feature.properties?.geoid,
               api.renderState.commutePeriodIdx,
+              api.renderState.commuteCells,
             )
             : areaTipHtml(data, level, featureIndex, feature.properties || {}, api.renderState.week)), { sticky: true })
           .on("click", () => api.renderState.callbacks.onMapClick(
@@ -747,13 +978,23 @@ function pointBounds(points) {
   return bounds;
 }
 
-function corridorMetrics(data, era, index, week, view, recThresh) {
+function corridorMetrics(data, era, index, week, view, recThresh, servicePeriod) {
   let load = 0;
   let imp = 0;
   for (const sectionId of data.corridors[era][index].s) {
     const [sectionLoadValue, imputedFraction] = sectionLoad(data, era, sectionId, week);
     load += sectionLoadValue;
     imp += sectionLoadValue * imputedFraction;
+  }
+  if (isServiceView(view)) {
+    // Drawn whether or not the APCs saw load here: the schedule is the source.
+    const service = corridorService(data, displaySnapshot(data, week), index);
+    if (!service) return null;
+    const color = view === "los"
+      ? headwayColor(service.headway[servicePeriod]) || NO_SERVICE
+      : speedColor(service.mph[servicePeriod]);
+    if (!color) return null;
+    return { load, imp, color, thickness: Math.min(1, Math.sqrt(load / corridorDomain(data))), service: true };
   }
   if (load <= 0 && view !== "recovery" && view !== "rel") return null;
   const color = corridorColor(data, era, index, load, imp, view, recThresh);
@@ -840,9 +1081,18 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
       projectionCache = { source: projectionSource, zoom, points: new Map() };
     }
     const pixelOrigin = map.getPixelOrigin();
-    const worldPointsFor = (key, coordinates) => {
+    // Per corridor, projected once per zoom: `anchors` are the Bezier chain's
+    // points (start, then control, control, end per segment) for drawing, and
+    // `samples` the curve flattened for bounds and hit-testing. A piece with
+    // no curve draws its raw polyline.
+    const worldShapeFor = (key, feature) => {
       if (!projectionCache.points.has(key)) {
-        projectionCache.points.set(key, coordinates.map((coordinate) => map.project(coordinate, zoom)));
+        const project = (lat, lon) => map.project([lat, lon], zoom);
+        const b = feature.b;
+        const anchors = [];
+        if (b) for (let i = 0; i + 1 < b.length; i += 2) anchors.push(project(b[i], b[i + 1]));
+        const samples = corridorLatLngs(feature).map(([lat, lon]) => project(lat, lon));
+        projectionCache.points.set(key, { anchors: b ? anchors : null, samples });
       }
       return projectionCache.points.get(key);
     };
@@ -853,20 +1103,28 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
     const records = [];
     const selectedRoute = options.selectedRoute;
     features.forEach((feature, index) => {
-      const metrics = corridorMetrics(data, options.era, index, options.week, options.view, options.recThresh);
+      if (options.onlySelected && !feature.r.some(
+        (routeDirection) => routeDirection.split("|")[0] === selectedRoute,
+      )) return;
+      const metrics = corridorMetrics(
+        data, options.era, index, options.week, options.view, options.recThresh, options.servicePeriod,
+      );
       if (!metrics) return;
       const selectedCorridor = selectedRoute && feature.r.some(
         (routeDirection) => routeDirection.split("|")[0] === selectedRoute,
       );
-      const points = worldPointsFor(index, feature.c).map((projected) => ({
+      const shape = worldShapeFor(index, feature);
+      const toScreen = (projected) => ({
         x: projected.x - pixelOrigin.x - origin.x,
         y: projected.y - pixelOrigin.y - origin.y,
-      }));
+      });
+      const points = shape.samples.map(toScreen);
       const bounds = pointBounds(points);
       if (bounds.maxX < -80 || bounds.minX > size.x + 80 || bounds.maxY < -80 || bounds.minY > size.y + 80) return;
       const routes = [...new Set(feature.r.map((routeDirection) => routeDirection.split("|")[0]))];
       records.push({
         points,
+        curve: shape.anchors ? shape.anchors.map(toScreen) : null,
         ...bounds,
         routes,
         route: routes[0],
@@ -874,7 +1132,10 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
         imp: metrics.imp,
         color: metrics.color,
         weight: (selectedCorridor ? 2.5 : 1) + metrics.thickness * (selectedCorridor ? 8 : 7),
-        opacity: selectedCorridor ? 0.95 : selectedRoute ? 0.07 : 0.32 + metrics.thickness * 0.35,
+        // Service colours are classes, and a faint class reads as the wrong
+        // one, so those views draw near-opaque regardless of load.
+        opacity: selectedCorridor ? 0.95 : selectedRoute ? 0.07
+          : metrics.service ? 0.85 : 0.32 + metrics.thickness * 0.35,
         corridorIndex: index,
         selected: !!selectedCorridor,
       });
@@ -884,14 +1145,26 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
     records.sort((first, second) => Number(first.selected) - Number(second.selected));
     for (const record of records) {
       context.beginPath();
-      record.points.forEach((point, index) => {
-        if (index === 0) context.moveTo(point.x, point.y);
-        else context.lineTo(point.x, point.y);
-      });
+      if (record.curve) {
+        const [start, ...rest] = record.curve;
+        context.moveTo(start.x, start.y);
+        for (let i = 0; i + 2 < rest.length; i += 3) {
+          context.bezierCurveTo(rest[i].x, rest[i].y, rest[i + 1].x, rest[i + 1].y, rest[i + 2].x, rest[i + 2].y);
+        }
+      } else {
+        record.points.forEach((point, index) => {
+          if (index === 0) context.moveTo(point.x, point.y);
+          else context.lineTo(point.x, point.y);
+        });
+      }
       context.strokeStyle = record.color;
       context.globalAlpha = record.opacity;
       context.lineWidth = record.weight;
-      context.lineCap = "round";
+      // Curved pieces meet end to end on a shared tangent, so flat ends butt
+      // together into one continuous line that changes colour and width only
+      // at a node. Round ends would overlap there, and at partial opacity
+      // every join would draw as a darker bead.
+      context.lineCap = record.curve ? "butt" : "round";
       context.lineJoin = "round";
       context.stroke();
       record.hitWidth = Math.max(7, record.weight / 2 + 3);
@@ -1026,6 +1299,8 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
       record.imp,
       options.view,
       options.recThresh,
+      options.servicePeriod,
+      options.week,
     );
     tooltip
       .setContent(tooltipHtml)
@@ -1088,13 +1363,27 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
 function nodeHoverHtml(flow) {
   const arrow = flow.net >= 0 ? "&#9650;" : "&#9660;";
   return `<div style="font-size:12px"><div class="row"><span class="k">${flow.name}</span></div>
-    <div class="row"><span class="k">Boarding / wk</span><span>${discloseHtml(flow.board - flow.boardImp, flow.boardImp)}</span></div>
-    <div class="row"><span class="k">Alighting / wk</span><span>${discloseHtml(flow.alight - flow.alightImp, flow.alightImp)}</span></div>
+    <div class="row"><span class="k">Boardings / wk</span><span>${discloseHtml(flow.board - flow.boardImp, flow.boardImp)}</span></div>
+    <div class="row"><span class="k">Drop-offs / wk</span><span>${discloseHtml(flow.alight - flow.alightImp, flow.alightImp)}</span></div>
     <div class="row"><span class="k">Net at this stop group</span><span>${arrow} ${Math.abs(Math.round(flow.net)).toLocaleString()}</span></div></div>`;
 }
 
-function corridorHoverHtml(data, era, index, load, imp, view, recThresh) {
+function corridorHoverHtml(data, era, index, load, imp, view, recThresh, servicePeriod, week) {
   let extra = "";
+  const snap = isServiceView(view) ? displaySnapshot(data, week) : null;
+  const service = snap ? corridorService(data, snap, index) : null;
+  if (service) {
+    // Every period, the active one in bold, so a hover answers "how does
+    // this street compare at night" without touching the selector.
+    extra = snap.periods.map((period, p) => {
+      const text = period.windows.length
+        ? `${formatHeadway(service.headway[p])} · ${formatMph(service.mph[p])}`
+        : "no peak";
+      return `<div class="row"><span class="k">${escapeHtml(period.label)}</span><span>${
+        p === servicePeriod ? `<b>${text}</b>` : text
+      }</span></div>`;
+    }).join("");
+  }
   const stats = corridorStats(data, era);
   const baseline = stats.base[index];
   if (view === "rel") {
@@ -1128,37 +1417,240 @@ function corridorHoverHtml(data, era, index, load, imp, view, recThresh) {
 
 /* ------------------------------------------------------------- commute view */
 
-const COMMUTE_MIN = 20;   // riders/weekday below which a place is left grey
 
 function peakLabel(hour) {
   if (hour === 12) return "12p";
   return hour < 12 ? `${hour}a` : `${hour - 12}p`;
 }
 
-function commuteValue(commute, level, key, mode, p) {
-  const stats = commuteStats(commute, level, key, p);
-  if (!stats || stats.total < COMMUTE_MIN) {
-    return { color: null, value: stats ? stats.total : 0 };
-  }
-  if (mode === "peaks") {
-    const t = Math.max(0, Math.min(1, (stats.peakRatio - 1) / 3));
-    return { color: ramp(SEQ_BLUE, Math.sqrt(t)), value: stats.total };
-  }
-  // Positive AM net = riders arrive in the morning = workplace (red side of
-  // the diverging ramp); negative = riders leave = residential (blue side).
-  const t = Math.max(0.06, Math.min(0.94, 0.5 + stats.amNet * 2.2));
-  return { color: ramp(DIVERGING, t), value: stats.total };
+/* ---- the commute grid: two sources x two ends of the commute ----
+
+   Picking one cell maps that measure's concentration; picking both cells of a
+   column compares them. Mixing columns is not offered, because bus arrivals
+   over resident workers is not a ratio of anything.
+
+   The AC Transit row is net round-trip commuters, not raw morning arrivals: a
+   morning arrival on its own cannot tell a commuter from a shopper, a student
+   or someone changing to BART. Against LODES workplace-ness the round-trip
+   measure scores rho 0.45 where raw arrivals score 0.22, and it holds that
+   across 2019/2023/2026 while raw arrivals decay. See round_trip() in
+   scripts/build_commute_pack.py. */
+
+// Only the home end is offered: where bus commuters live against where all
+// employed residents live. The workplace cells were dropped from the app.
+const COMMUTE_CELLS = {
+  "ac-home": { label: "AC Transit commuters", col: "home", src: "ac" },
+  "all-home": { label: "All commuters", col: "home", src: "all" },
+};
+const COMMUTE_DEFAULT_CELLS = ["ac-home"];
+// The three buttons, each a set of cells: one measure alone, or both compared.
+const COMMUTE_MODES = [
+  ["ac", "AC Transit commuters", ["ac-home"]],
+  ["all", "All commuters", ["all-home"]],
+  ["compare", "Compare", ["ac-home", "all-home"]],
+];
+
+// LODES is published per tract and per year, so those two cells exist only at
+// tract level; the AC cells work at every area level.
+function cellIsTractOnly(cell) {
+  return COMMUTE_CELLS[cell].src === "all";
 }
 
-function commuteTipHtml(data, level, keyIndex, name, p) {
+export function commuteLocksTractFor(cells) {
+  return cells.some(cellIsTractOnly);
+}
+
+/* Toggling a cell. Two cells of one column compare; a click in the other
+   column starts over rather than building a cross-column pair that has no
+   meaning, and the last selected cell cannot be switched off -- the map would
+   have nothing to draw. */
+export function toggleCommuteCell(cells, cell) {
+  if (cells.includes(cell)) {
+    return cells.length > 1 ? cells.filter((c) => c !== cell) : cells;
+  }
+  const col = COMMUTE_CELLS[cell].col;
+  const sameCol = cells.filter((c) => COMMUTE_CELLS[c].col === col);
+  return sameCol.length === 1 ? orderCells([...sameCol, cell]) : [cell];
+}
+
+/* A pair always reads AC Transit first, whichever cell was clicked first, so
+   the diverging ramp means one fixed thing: red is more AC Transit than all
+   commuters would imply, blue is more non-AC. Click order must never be able
+   to flip the map's colours. */
+function orderCells(cells) {
+  return [...cells].sort(
+    (a, b) => (COMMUTE_CELLS[a].src === "ac" ? 0 : 1) - (COMMUTE_CELLS[b].src === "ac" ? 0 : 1),
+  );
+}
+
+function cellValue(data, level, key, p, cell) {
+  const spec = COMMUTE_CELLS[cell];
+  if (spec.src === "all") {
+    if (level !== "tract" || !data.lodes) return null;
+    const field = spec.col === "work" ? "jobs" : "workers";
+    return lodesAt(data.lodes, field, lodesYear(data, p), key);
+  }
+  const rt = commuteRt(data.commute, level, key, p);
+  if (rt) return spec.col === "work" ? rt.work : rt.home;
+  // Pack built before the round-trip bins existed: fall back to the raw
+  // morning marginals so an older bundle still renders the grid.
+  const stats = commuteStats(data.commute, level, key, p);
+  if (!stats) return null;
+  return spec.col === "work" ? stats.amIn : stats.amOut;
+}
+
+function cellTotal(data, level, p, cell) {
+  const spec = COMMUTE_CELLS[cell];
+  if (spec.src === "all") {
+    return lodesTotal(data.lodes, spec.col === "work" ? "jobs" : "workers",
+      lodesYear(data, p));
+  }
+  const totals = commuteRtTotals(data.commute, level, p);
+  if (totals) return spec.col === "work" ? totals.work : totals.home;
+  return lodesArrivals(data.commute, level, p, spec.col).sum;
+}
+
+function cellDomain(data, level, p, cell) {
+  const spec = COMMUTE_CELLS[cell];
+  if (spec.src === "all") {
+    return lodesDomain(data.lodes, lodesYear(data, p),
+      spec.col === "work" ? "jobs" : "workers");
+  }
+  if (data.commute.rt) {
+    return commuteRtDomain(data.commute, level, p, spec.col);
+  }
+  return commuteDomain(data.commute, level, p, spec.col === "work" ? "amIn" : "amOut");
+}
+
+// Concentration: this place's share of everyone the cell counts.
+function cellShare(data, level, key, p, cell) {
+  const value = cellValue(data, level, key, p, cell);
+  const total = cellTotal(data, level, p, cell);
+  return value === null || !(total > 0) ? NaN : value / total;
+}
+
+/* Is there enough here to say anything? The AC cells need the shared service
+   floor; the LODES cells do not, because an unserved tract still has jobs. */
+function cellDrawable(data, level, key, p, cell) {
+  if (COMMUTE_CELLS[cell].src === "all") {
+    const value = cellValue(data, level, key, p, cell);
+    return value !== null && value >= COMMUTE_MIN;
+  }
+  const stats = commuteStats(data.commute, level, key, p);
+  return !!stats && stats.total >= COMMUTE_MIN;
+}
+
+/* One cell: that count on the magenta ramp, against the 98th percentile of the
+   same measure. Compare: AC Transit commuters divided by all commuters living
+   in the tract, on the blue-red diverging ramp centred on the median tract --
+   white is the median, red a higher share, blue a lower one -- log2, so either
+   end is 4x or 1/4x the median. */
+function commuteCellColor(data, level, key, p, cells) {
+  if (!cells.every((cell) => cellDrawable(data, level, key, p, cell))) return null;
+  if (cells.length === 1) {
+    const value = cellValue(data, level, key, p, cells[0]);
+    if (value === null) return null;
+    return ramp(SEQ_MAGENTA, seqT(value, cellDomain(data, level, p, cells[0])));
+  }
+  const ratio = commuteCellRatio(data, level, key, p, cells);
+  return Number.isFinite(ratio) ? ramp(DIVERGING, divT(ratio / compareMedian(data, level, p))) : null;
+}
+
+/* AC Transit commuters per all commuters in one tract: the estimated round-trip
+   bus commuters on an average weekday over the LODES employed residents. NaN --
+   grey -- when there are no workers to divide by. */
+function commuteCellRatio(data, level, key, p, cells) {
+  if (cells.length !== 2) return NaN;
+  const [ac, all] = orderCells(cells);
+  const a = cellValue(data, level, key, p, ac);
+  const b = cellValue(data, level, key, p, all);
+  return a === null || !(b > 0) ? NaN : a / b;
+}
+
+// The median compare ratio over tracts drawn at all, cached per snapshot.
+function compareMedian(data, level, p) {
+  const cache = data.commute.commuteDomains;
+  const cacheKey = `compareMedian|${level}|${p}`;
+  if (cache[cacheKey]) return cache[cacheKey];
+  const cells = ["ac-home", "all-home"];
+  const values = [];
+  const n = level === "tract" ? data.meta.tracts.length : 0;
+  for (let key = 0; key < n; key += 1) {
+    if (!cells.every((cell) => cellDrawable(data, level, key, p, cell))) continue;
+    const ratio = commuteCellRatio(data, level, key, p, cells);
+    if (ratio > 0) values.push(ratio);
+  }
+  values.sort((a, b) => a - b);
+  cache[cacheKey] = values.length ? values[Math.floor(values.length / 2)] : 1;
+  return cache[cacheKey];
+}
+
+function commuteValue(data, level, key, cells, p) {
+  const stats = commuteStats(data.commute, level, key, p);
+  return {
+    color: commuteCellColor(data, level, key, p, cells),
+    value: stats ? stats.total : 0,
+  };
+}
+
+/* Memo tables for the LODES ramps, held beside the pack rather than on it so
+   the parsed object stays a faithful copy of lodes.json. */
+const lodesMemos = new WeakMap();
+
+function lodesMemo(lodes) {
+  let memo = lodesMemos.get(lodes);
+  if (!memo) {
+    memo = { domains: {}, totals: {} };
+    lodesMemos.set(lodes, memo);
+  }
+  return memo;
+}
+
+// p98 of the year's counts, the same rule commuteDomain uses.
+function lodesDomain(lodes, year, field = "jobs") {
+  const { domains } = lodesMemo(lodes);
+  const cacheKey = `${field}|${year}`;
+  if (!domains[cacheKey]) {
+    const values = (lodes[field]?.[year] || []).filter((v) => v >= COMMUTE_MIN);
+    values.sort((a, b) => a - b);
+    domains[cacheKey] = values.length ? values[Math.floor(values.length * 0.98)] : 1;
+  }
+  return domains[cacheKey];
+}
+
+function lodesTotal(lodes, field, year) {
+  const { totals } = lodesMemo(lodes);
+  const cacheKey = `${field}|${year}`;
+  if (!(cacheKey in totals)) {
+    totals[cacheKey] = (lodes[field]?.[year] || []).reduce((s, v) => s + v, 0);
+  }
+  return totals[cacheKey];
+}
+
+function lodesYear(data, p) {
+  return lodesYearFor(data.lodes, data.commute.meta.periods[p].id);
+}
+
+function commuteTipHtml(data, level, keyIndex, name, p, cells) {
+  const rows = cells.map((cell) => {
+    const value = cellValue(data, level, keyIndex, p, cell);
+    const label = COMMUTE_CELLS[cell].src === "all"
+      ? `${COMMUTE_CELLS[cell].label} (${lodesYear(data, p)})`
+      : COMMUTE_CELLS[cell].label;
+    return `<div class="row"><span class="k">${escapeHtml(label)}</span><span>${
+      value === null ? "-" : fmt(value)
+    }</span></div>`;
+  }).join("");
+  const ratio = commuteCellRatio(data, level, keyIndex, p, cells);
   const stats = commuteStats(data.commute, level, keyIndex, p);
-  if (!stats) return "";
-  const growth = stats.baseTotal > 0 ? `${(100 * stats.total / stats.baseTotal).toFixed(0)}%` : "-";
   return `<div style="font-size:12px"><b>${escapeHtml(name)}</b>
-    <div class="row"><span class="k">Riders / weekday</span><span>${fmt(stats.total)}</span></div>
-    <div class="row"><span class="k">vs Feb 2020</span><span>${growth}</span></div>
-    <div class="row"><span class="k">AM balance</span><span>${stats.amNet >= 0 ? "+" : ""}${(100 * stats.amNet).toFixed(0)}%</span></div>
-    <div class="row"><span class="k">Peak strength</span><span>${Number.isFinite(stats.peakRatio) ? `${stats.peakRatio.toFixed(1)}×` : "-"}</span></div>
+    ${rows}
+    ${Number.isFinite(ratio)
+      ? `<div class="row"><span class="k">AC Transit ÷ all commuters</span><span>${(100 * ratio).toFixed(1)}%</span></div>`
+      : ""}
+    ${stats
+      ? `<div class="row"><span class="k">All riders / weekday</span><span>${fmt(stats.total)}</span></div>`
+      : ""}
   </div>`;
 }
 
@@ -1177,7 +1669,7 @@ function CommutePanel({ data, commute, level, keyIndex, p }) {
       <h4>Weekday profile · {period.label}</h4>
       <HourlyChart now={now} base={base} windows={commute.meta.windows} />
       <p className="hint">
-        Boardings above the line, alightings below, average weekday. Grey outline: {commute.meta.base_label ?? "Feb 2020"}.
+        Boardings above the line, drop-offs below, average weekday. Grey outline: {commute.meta.base_label ?? "Feb 2020"}.
       </p>
       <div style={{ marginBottom: 6 }}>
         <Row label="Riders / weekday">{fmt(stats.total)}</Row>
@@ -1200,22 +1692,24 @@ function CommutePanel({ data, commute, level, keyIndex, p }) {
 
 function renderMapLayers(api, data, options) {
   const { routeCanvas } = api;
-  const { week, view, level, showRoutes, detail, recThresh } = options;
+  const { week, view, level, detail, recThresh } = options;
   renderDataLayer(api, data, options);
 
-  if (!showRoutes) {
-    routeCanvas?.setOptions({ visible: false });
-    return;
-  }
+  // Corridors belong to the stop-group map (and the routes-only one). Over
+  // tracts, block groups and cities they bury the areas, so there only an
+  // opened route's own corridors are drawn, to keep it findable.
+  const selectedRoute = detail?.lv === "route" ? detail.key : null;
+  // Recovery time on stop groups leaves them out too: it is a per-place map
+  // that does not follow the time bar, and the corridors would.
+  const corridorLevel = (level === "group" && view !== "recovery") || level === "none";
   const era = eraForWeek(data, week);
-  if (!era || !data.corridors[era]) {
+  if (!era || !data.corridors[era] || (!corridorLevel && !selectedRoute)) {
     routeCanvas?.setOptions({ visible: false });
     return;
   }
   corridorStats(data, era);
   corridorDomain(data);
   const features = data.corridors[era];
-  const selectedRoute = detail?.lv === "route" ? detail.key : null;
 
   // Corridors are the shared street representation. Each path is drawn once
   // and carries all routes that use it, so overlapping services do not turn
@@ -1229,10 +1723,70 @@ function renderMapLayers(api, data, options) {
     week,
     view: view === "commute" || view === "income" ? "total" : view,
     recThresh,
+    servicePeriod: options.servicePeriod,
     selectedRoute,
-    nodes: data.corridorNodes?.[era] || null,
+    onlySelected: !corridorLevel,
+    nodes: corridorLevel ? data.corridorNodes?.[era] || null : null,
     groupMarkers: level === "group" ? api.groupMarkers : null,
   });
+}
+
+/* One plain paragraph per view, shown under the option while it is selected:
+   what the colours and sizes are, where the numbers come from, nothing more. */
+const VIEW_DESCRIPTIONS = {
+  total: "How many times people got on or off an AC Transit bus at each place during the selected week. Larger, darker circles and areas mean more riders.",
+  rel: "Riders at each place in the selected week as a share of the week of Feb. 3, 2020. 100% means the same number of boardings and drop-offs as that week; green is above it and red below.",
+  recovery: "The first month in which each place's ridership held the chosen share of its February 2020 level for three months in a row. It does not change with the time bar.",
+  commute: "Where commuters live. AC Transit commuters is an estimate from the bus counters: a morning trip counts only when the same trip is made in reverse that evening. All commuters is the Census Bureau's count of employed residents. Compare divides the first by the second for each Census tract.",
+  speed: "The average speed of buses on each street, in miles per hour, from the times their doors opened at one stop and the next. It includes time spent at stops and traffic lights.",
+  los: "How often a bus comes on each street, counting every route that uses it: the average number of minutes between buses in one direction during the chosen time of day.",
+  imp: "The share of each place's count that is estimated rather than measured. Estimates fill in for buses without working passenger counters, and for new routes after the August 2025 service changes.",
+};
+
+const ABOUT_SEEN_KEY = "acpra-about-seen";
+
+function AboutModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (event) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="about-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="about-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="aboutTitle"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="aboutTitle">About this data</h2>
+        <p>
+          These maps show AC Transit bus ridership from January 2019 to May 2026. The counts come from
+          automatic passenger counters: sensors at bus doors that record how many people get on and off at
+          each stop.
+        </p>
+        <p>
+          Not every bus had a working counter, especially before 2021. Where a route’s counters were missing
+          or unreliable for a month, its riders were estimated from AC Transit’s route totals, and all counts
+          were adjusted to match the ridership AC Transit reports to the federal National Transit Database.
+        </p>
+        <p>
+          Numbers on the map read as a total followed by the estimated part in gold: <b>1,200</b>{" "}
+          <span className="gold">(300)</span> means 1,200 riders, 300 of them estimated.
+        </p>
+        <p>
+          Trips between places, commute patterns, speeds and bus frequency are all calculated from these
+          counts. They are estimates, not records of individual trips.
+        </p>
+        <div className="about-actions">
+          <a className="about-link" href="/story">Read the story →</a>
+          <a className="about-link" href="/methodology">Methodology →</a>
+          <button className="btn" type="button" onClick={onClose}>Explore the map</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function RidershipExplorer() {
@@ -1242,14 +1796,33 @@ export default function RidershipExplorer() {
   const [week, setWeek] = useState(0);
   const [view, setView] = useState("total");
   const [level, setLevel] = useState("group");
-  const [showRoutes, setShowRoutes] = useState(true);
   const [recThresh, setRecThresh] = useState(3);
+  const [servicePeriod, setServicePeriod] = useState(0);
+  // Bumped whenever on-demand data lands, so the map and panels redraw.
+  const [loadTick, setLoadTick] = useState(0);
+  // The methodology note opens on a first visit and from the sidebar after.
+  const [aboutOpen, setAboutOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (!window.localStorage.getItem(ABOUT_SEEN_KEY)) setAboutOpen(true);
+    } catch {
+      setAboutOpen(true);
+    }
+  }, []);
+  const closeAbout = () => {
+    setAboutOpen(false);
+    try {
+      window.localStorage.setItem(ABOUT_SEEN_KEY, "1");
+    } catch {
+      // Private windows can refuse storage; the note just shows again next time.
+    }
+  };
   const [playing, setPlaying] = useState(false);
   const [detail, setDetail] = useState(null);
   const [selection, setSelection] = useState(null);
   const [routeMode, setRouteMode] = useState("own");
   const [contextMenu, setContextMenu] = useState(null);
-  const [commuteMode, setCommuteMode] = useState("character");
+  const [commuteCells, setCommuteCells] = useState(COMMUTE_DEFAULT_CELLS);
   const [commuteFocus, setCommuteFocus] = useState(null);
   const [commuteFocusMode, setCommuteFocusMode] = useState("to");
   const [regionChooser, setRegionChooser] = useState(null);
@@ -1305,18 +1878,105 @@ export default function RidershipExplorer() {
   }
   const odInFlightRef = useRef(null);
 
+  // What the current view needs beyond the startup bundle. A route's detail
+  // charts every era and shows its month of service; any detail panel shows
+  // the commute profile.
+  const needs = data ? {
+    levels: [level],
+    eras: detail?.lv === "route" ? Object.keys(data.meta.sections) : [eraForWeek(data, week)],
+    serviceMonth: data.service && (isServiceView(view) || detail?.lv === "route")
+      ? serviceSnapshot(data, week) : null,
+    commute: view === "commute" || !!detail,
+    speed: !!selection,
+  } : null;
+  const needsKey = needs ? JSON.stringify({ ...needs, serviceMonth: needs.serviceMonth?.id }) : "";
+  const loadingData = !!needs && isPending(data, needs);
+  useEffect(() => {
+    if (!data) return undefined;
+    let cancelled = false;
+    ensureData(data, needs)
+      .then((changed) => { if (changed && !cancelled) setLoadTick((tick) => tick + 1); })
+      .catch((loadError) => { if (!cancelled) setError(loadError); });
+    return () => { cancelled = true; };
+    // needsKey stands for needs; the object itself is new every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, needsKey]);
+
+  // Predictive buffering. Which way the time bar last moved decides what is
+  // "ahead"; play always moves forward. A short pause before planning lets a
+  // fast drag settle, so the queue follows where the bar is going rather than
+  // every week it passed through.
+  const prefetcherRef = useRef(null);
+  const lastWeekRef = useRef(null);
+  const directionRef = useRef(1);
+  if (lastWeekRef.current !== null && week !== lastWeekRef.current) {
+    directionRef.current = week > lastWeekRef.current ? 1 : -1;
+  }
+  lastWeekRef.current = week;
+  const focusActive = view === "commute" && !!commuteFocus;
+  useEffect(() => {
+    if (!data) return undefined;
+    if (!prefetcherRef.current || prefetcherRef.current.data !== data) {
+      prefetcherRef.current = { data, ...createPrefetcher(data) };
+    }
+    const prefetcher = prefetcherRef.current;
+    const direction = playing ? 1 : directionRef.current;
+    const timer = window.setTimeout(() => {
+      const jobs = [];
+      // The next era's corridors first when a crossing is near: they are the
+      // biggest thing a scrub can hit, and every view draws them.
+      for (const needs of eraLookahead(data, week, direction)) jobs.push(prefetcher.ensure(needs));
+      if (isServiceView(view)) {
+        for (const needs of serviceLookahead(data, week, direction)) jobs.push(prefetcher.ensure(needs));
+      }
+      if (focusActive && data.commute) {
+        for (const id of commuteOdLookahead(data.commute, commutePeriodIdx, direction)) {
+          jobs.push(() => loadCommuteOD(data.commute, id));
+        }
+      } else if (view === "commute" && data.commute) {
+        // No focus yet: the snapshot a click would open.
+        const id = data.commute.meta.periods[commutePeriodIdx]?.id;
+        if (id && data.commute.meta.od?.[id]) jobs.push(() => loadCommuteOD(data.commute, id));
+      }
+      prefetcher.schedule(jobs);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [data, week, view, playing, focusActive, commutePeriodIdx]);
+
+  // LODES is published per tract, so the All-commuters and Compare modes only
+  // exist at tract level; entering them moves the map and greys the selector.
+  const commuteLocksTract = view === "commute"
+    && commuteLocksTractFor(commuteCells);
+  // Speed and level of service live on the corridors, which only the
+  // stop-group and routes-only maps draw.
+  const serviceLocksCorridors = isServiceView(view);
+  useEffect(() => {
+    if (!serviceLocksCorridors) return;
+    setLevel((current) => (current === "group" || current === "none" ? current : "group"));
+    setDetail((current) => (current && current.lv !== "route" && current.lv !== "group" ? null : current));
+  }, [serviceLocksCorridors]);
+  useEffect(() => {
+    if (!commuteLocksTract) return;
+    setLevel((current) => (current === "tract" ? current : "tract"));
+    setCommuteFocus(null);
+    setDetail((current) => (current && current.lv !== "route" && current.lv !== "tract" ? null : current));
+  }, [commuteLocksTract]);
+
   // Clicking a place in the commute view recolours the map by inferred flows
   // to (or from) it; the O-D file for the time bar's snapshot is fetched on
   // demand and refetched here whenever the snapshot moves under an active
   // focus (the week slider drives the snapshot).
+  // While the next snapshot downloads, the focus keeps the flows it has
+  // (`listsAnchor` records whose they are) rather than dropping them, which
+  // used to flash the whole map back to the unfocused colours on every step.
   useEffect(() => {
     if (!commute || !commuteFocus) return;
     const anchorId = commute.meta.periods[commutePeriodIdx].id;
     if (commuteFocus.anchor !== anchorId) {
-      setCommuteFocus((current) => current ? { ...current, anchor: anchorId, lists: null } : current);
+      setCommuteFocus((current) => current ? { ...current, anchor: anchorId } : current);
       return;
     }
-    if (commuteFocus.lists) return;
+    if (commuteFocus.lists && commuteFocus.listsAnchor === anchorId) return;
     const token = `${anchorId}|${commuteFocus.level}|${commuteFocus.key}`;
     if (odInFlightRef.current === token) return;
     odInFlightRef.current = token;
@@ -1326,15 +1986,19 @@ export default function RidershipExplorer() {
           if (!current || current.anchor !== anchorId
             || current.level !== commuteFocus.level) return current;
           if (current.kind === "region") {
-            return { ...current, lists: commuteRegionLists(data.meta, store, current.keys, current.level) };
+            return {
+              ...current,
+              listsAnchor: anchorId,
+              lists: commuteRegionLists(data.meta, store, current.keys, current.level),
+            };
           }
           if (current.key !== commuteFocus.key) return current;
-          return { ...current, lists: commuteODLists(store, current.level, current.key) };
+          return { ...current, listsAnchor: anchorId, lists: commuteODLists(store, current.level, current.key) };
         });
       })
       .catch(() => {
         setCommuteFocus((current) => current && current.anchor === anchorId
-          ? { ...current, lists: { in: [], out: [] } }
+          ? { ...current, listsAnchor: anchorId, lists: { in: [], out: [] } }
           : current);
       })
       .finally(() => {
@@ -1347,7 +2011,7 @@ export default function RidershipExplorer() {
     onContext: setContextMenu,
     onMapClick: (lv, key, label) => {
       openDetail(lv, key, label);
-      if (view === "commute" && commute && lv !== "route") {
+      if (view === "commute" && commute && lv !== "route" && !commuteLocksTract) {
         setCommuteFocus({
           kind: "place",
           level: lv,
@@ -1373,7 +2037,7 @@ export default function RidershipExplorer() {
       if (!picked.length) return;
       // In the commute view a box can become a region origin ("from") or
       // destination ("to") for the inferred-riders recolouring.
-      if (view === "commute" && commute && level !== "none") {
+      if (view === "commute" && commute && level !== "none" && !commuteLocksTract) {
         const api = mapApiRef.current;
         const point = api?.map ? api.map.latLngToContainerPoint([northWest.lat, northWest.lng]) : null;
         const wrap = mapWrapRef.current?.getBoundingClientRect();
@@ -1382,12 +2046,16 @@ export default function RidershipExplorer() {
         setContextMenu(null);
         setRegionChooser({
           keys: picked,
+          bounds: { north: northWest.lat, south: southEast.lat, west: northWest.lng, east: southEast.lng },
           x: point ? Math.max(8, Math.min(point.x, (wrap?.width || 800) - 260)) : 20,
           y: point ? Math.max(8, Math.min(point.y, (wrap?.height || 600) - 170)) : 20,
         });
         return;
       }
-      setSelection(picked);
+      setSelection({
+        keys: picked,
+        bounds: { north: northWest.lat, south: southEast.lat, west: northWest.lng, east: southEast.lng },
+      });
       setDetail(null);
       setContextMenu(null);
     },
@@ -1549,11 +2217,11 @@ export default function RidershipExplorer() {
       week,
       view,
       level,
-      showRoutes,
       detail,
       recThresh,
+      servicePeriod,
       commute: data.commute,
-      commuteMode,
+      commuteCells,
       commutePeriodIdx,
       commuteFocus,
       commuteFocusMode,
@@ -1563,13 +2231,16 @@ export default function RidershipExplorer() {
         onMapClick: (...args) => callbacksRef.current.onMapClick(...args),
       },
     });
-  }, [data, mapReady, week, view, level, showRoutes, detail, recThresh, commuteMode, commutePeriodIdx, commuteFocus, commuteFocusMode]);
+  }, [data, mapReady, loadTick, week, view, level, detail, recThresh, servicePeriod, commuteCells, commutePeriodIdx, commuteFocus, commuteFocusMode]);
 
   useEffect(() => {
     if (!playing || !data) return undefined;
     const timer = window.setInterval(() => setWeek((current) => (current + 1) % data.W), 220);
     return () => window.clearInterval(timer);
   }, [playing, data]);
+
+  const levelLocked = (value) => (commuteLocksTract && value !== "tract")
+    || (serviceLocksCorridors && value !== "group" && value !== "none");
 
   let systemTotal = 0;
   let systemImputed = 0;
@@ -1585,31 +2256,34 @@ export default function RidershipExplorer() {
       <div id="app">
         <aside id="sidebar">
           <h1>AC Transit Ridership</h1>
-          <p className="sub">Weekly boardings + alightings, 2019-2026</p>
+          <p className="sub">Weekly boardings and drop-offs, 2019–2026</p>
 
           <section>
             <h2>View</h2>
             {[
               ["total", "Total ridership"],
               ["rel", "Relative to Feb 2020"],
-              ["imp", "Percent imputed"],
               ["recovery", "Recovery time"],
-              ...(data?.meta?.income ? [["income", "Median income"]] : []),
               ...(data?.commute ? [["commute", "Commute pattern"]] : []),
+              ...(data?.service ? [["speed", "Speed per corridor"], ["los", "Level of service"]] : []),
+              ["imp", "Percent imputed"],
             ].map(([value, label]) => (
-              <label key={value}>
-                <input
-                  type="radio"
-                  name="view"
-                  value={value}
-                  checked={view === value}
-                  onChange={(event) => {
-                    setView(event.target.value);
-                    if (event.target.value !== "commute") setCommuteFocus(null);
-                  }}
-                />
-                {label}
-              </label>
+              <div key={value}>
+                <label>
+                  <input
+                    type="radio"
+                    name="view"
+                    value={value}
+                    checked={view === value}
+                    onChange={(event) => {
+                      setView(event.target.value);
+                      if (event.target.value !== "commute") setCommuteFocus(null);
+                    }}
+                  />
+                  {label}
+                </label>
+                {view === value ? <p className="view-desc">{VIEW_DESCRIPTIONS[value]}</p> : null}
+              </div>
             ))}
             {view === "recovery" ? (
               <div id="recCtl">
@@ -1622,7 +2296,24 @@ export default function RidershipExplorer() {
                   </select>
                   of Feb 2020
                 </label>
-                <p className="hint">Colour = when the area first held that level for three straight months. Independent of the time bar.</p>
+              </div>
+            ) : null}
+            {isServiceView(view) && data?.service ? (
+              <div id="recCtl">
+                <div className="seg seg-wrap">
+                  {(displaySnapshot(data, week)?.periods || data.service.snapshots[0].periods).map((period, index, snapPeriods) => (
+                    <button
+                      key={period.id}
+                      type="button"
+                      title={periodHours(period, snapPeriods)}
+                      className={`segbtn${servicePeriod === index ? " on" : ""}`}
+                      onClick={() => setServicePeriod(index)}
+                    >
+                      {period.label.replace("Weekday ", "")}
+                    </button>
+                  ))}
+                </div>
+                <p className="hint">Hover a street for every time of day, or open a route for its own table.</p>
               </div>
             ) : null}
             {view === "commute" && data?.commute ? (
@@ -1662,33 +2353,36 @@ export default function RidershipExplorer() {
                     </p>
                   </>
                 ) : (
-                  <div className="seg">
-                    {[
-                      ["character", "Workplaces / homes"],
-                      ["peaks", "Peak strength"],
-                    ].map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={`segbtn${commuteMode === value ? " on" : ""}`}
-                        onClick={() => setCommuteMode(value)}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  <div className="seg seg-wrap">
+                    {COMMUTE_MODES.map(([mode, label, cells]) => {
+                      const disabled = cells.some(cellIsTractOnly) && !data.lodes;
+                      const on = cells.length === commuteCells.length && cells.every((cell) => commuteCells.includes(cell));
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`segbtn${on ? " on" : ""}`}
+                          disabled={disabled}
+                          aria-pressed={on}
+                          onClick={() => setCommuteCells(cells)}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
+                {!commuteFocus ? (
+                  <p className="hint">
+                    {commuteCells.length === 1
+                      ? `${COMMUTE_CELLS[commuteCells[0]].label} living in each place.`
+                      : "AC Transit commuters divided by all commuters living in each Census tract."}
+                    {data.lodes ? "" : " All commuters needs lodes.json, which this data bundle does not include."}
+                  </p>
+                ) : null}
                 <p className="hint">
-                  Showing the {data.commute.meta.periods[commutePeriodIdx].label} average weekday
-                  ({data.commute.meta.periods[commutePeriodIdx].weekdays} weekdays, APC-corrected) —
-                  the snapshot follows the time bar, so scrub it to compare pre- and post-pandemic
-                  patterns.{" "}
-                  {Math.round((1 - data.commute.meta.periods[commutePeriodIdx].reliable) * 100)}% of
-                  volume is imputed
-                  {data.commute.meta.periods[commutePeriodIdx].odCoverage < 0.99
-                    ? `; inferred flows cover ${Math.round(data.commute.meta.periods[commutePeriodIdx].odCoverage * 100)}% of ridership`
-                    : ""}
-                  .
+                  {data.commute.meta.periods[commutePeriodIdx].label}, average weekday. Click a place to
+                  see estimated morning trips to or from it.
                 </p>
               </div>
             ) : null}
@@ -1700,14 +2394,16 @@ export default function RidershipExplorer() {
               ["group", "Stop groups"],
               ["bgroup", "Block groups"],
               ["tract", "Census tracts"],
-              ["none", "None (routes only)"],
+              ...(data?.cities ? [["city", "Cities"]] : []),
+              ["none", "Corridors"],
             ].map(([value, label]) => (
-              <label key={value}>
+              <label key={value} style={levelLocked(value) ? { opacity: 0.55 } : undefined}>
                 <input
                   type="radio"
                   name="level"
                   value={value}
                   checked={level === value}
+                  disabled={levelLocked(value)}
                   onChange={(event) => {
                     const nextLevel = event.target.value;
                     setLevel(nextLevel);
@@ -1718,15 +2414,9 @@ export default function RidershipExplorer() {
                 {label}
               </label>
             ))}
-          </section>
-
-          <section>
-            <h2>Routes</h2>
-            <label>
-              <input type="checkbox" checked={showRoutes} onChange={(event) => setShowRoutes(event.target.checked)} />
-              Show corridors
-            </label>
-            <p className="hint">Line width = onboard load; line colour follows the active view (same ramps as the areas). Corridors merge routes sharing a road. Click a corridor to pick a line.</p>
+            {commuteLocksTract ? (
+              <p className="hint">All commuters is published only for Census tracts.</p>
+            ) : null}
           </section>
 
           <section id="legendBox">
@@ -1737,10 +2427,12 @@ export default function RidershipExplorer() {
               level={level}
               recThresh={recThresh}
               commute={data?.commute}
-              commuteMode={commuteMode}
+              commuteCells={commuteCells}
               period={data?.commute ? data.commute.meta.periods[commutePeriodIdx] : null}
               commuteFocus={commuteFocus}
               commuteFocusMode={commuteFocusMode}
+              servicePeriod={servicePeriod}
+              week={week}
               focusMax={commuteFocus?.lists
                 ? (commuteFocusMode === "from"
                   ? commuteFocus.lists.out[0]?.flow
@@ -1751,14 +2443,16 @@ export default function RidershipExplorer() {
 
           <section>
             <h2>Selection</h2>
-            <p className="hint">Click any stop group or area for details. Shift-drag to chart a whole region.</p>
+            <p className="hint">
+              Click a stop, an area or a street to see its numbers. To chart several places together, hold
+              Shift and drag a box across the map.
+            </p>
             <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>Clear selection</button>
           </section>
 
-          <p className="disclosure">
-            Every figure reads <b>Real+Imputed</b> <span className="gold">(Imputed)</span>.
-            Imputed covers APC route-months failing the reliability gate - including the May-Jul 2019 fleet collapse - and post-Realign labels reconstructed from schedule + predecessor stop shares.
-          </p>
+          <button className="btn about-btn" type="button" onClick={() => setAboutOpen(true)}>
+            About this data
+          </button>
         </aside>
 
         <main id="mapWrap" ref={mapWrapRef}>
@@ -1788,7 +2482,7 @@ export default function RidershipExplorer() {
                 className="ctx-item"
                 type="button"
                 onClick={() => {
-                  setSelection(regionChooser.keys);
+                  setSelection({ keys: regionChooser.keys, bounds: regionChooser.bounds });
                   setDetail(null);
                   setRegionChooser(null);
                 }}
@@ -1806,10 +2500,11 @@ export default function RidershipExplorer() {
               routeMode={routeMode}
               onRouteClick={openRouteDetail}
               onModeChange={setRouteMode}
-              onClose={closeDetail}
-              commute={data.commute}
-              periodIdx={commutePeriodIdx}
-            />
+            onClose={closeDetail}
+            commute={data.commute}
+            periodIdx={commutePeriodIdx}
+            commuteCells={commuteCells}
+          />
           ) : null}
           {selection && data ? (
             <SelectionPanel
@@ -1842,7 +2537,9 @@ export default function RidershipExplorer() {
           </div>
         </footer>
       </div>
-      {loading ? <div id="loading">Loading ~30 MB of prepacked data...</div> : null}
+      {aboutOpen ? <AboutModal onClose={closeAbout} /> : null}
+      {loading ? <div id="loading">Loading ridership data...</div> : null}
+      {!loading && loadingData ? <div className="loading-chip">Loading data for this view...</div> : null}
       {error ? (
         <div className="error-state">
           <div><strong>Unable to load the visualization</strong>{error.message}</div>

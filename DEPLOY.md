@@ -26,7 +26,8 @@ between the two.
 | Cloud Run service | `ac-transit-ridership` |
 | Live URL | `https://ac-transit-ridership-385939155005.us-west1.run.app` |
 | Data bucket | `gs://ac-transit-ridership-pack` |
-| Data base URL | `https://storage.googleapis.com/ac-transit-ridership-pack/pack` |
+| Data base URL (live) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack-2026-09-18` |
+| Data base URL (default in Dockerfile) | `https://storage.googleapis.com/ac-transit-ridership-pack/pack` |
 | Build service account | `385939155005-compute@developer.gserviceaccount.com` |
 | HF dataset | `somemone/ac-transit-apc` |
 
@@ -125,6 +126,21 @@ the CARTO key, so it always lands on the OSM fallback.
 
 ## Updating the data bundle
 
+**Which prefix is live.** The deployed revision reads `pack-2026-09-18`, not
+`pack`, because a dated prefix was the only way to get a data fix out without
+waiting a day for cached copies of `pack/` to expire. Upload new data to the
+prefix the running revision uses — check it with:
+
+```bash
+URL=https://ac-transit-ridership-385939155005.us-west1.run.app
+CHUNK=$(curl -sS "$URL/" | grep -o '/_next/static/chunks/app/page-[a-z0-9]*\.js' | head -1)
+curl -sS "$URL$CHUNK" | grep -o 'ac-transit-ridership-pack/[a-z0-9-]*' | head -1
+```
+
+Uploading to a *new* dated prefix and rebuilding with `_PACK_BASE` pointing at
+it is the way to bypass the edge cache; the `pack/` prefix stays as the
+Dockerfile default, so keep it current too, or update the default.
+
 Regenerate the bundle into `public/data/pack/`, then:
 
 ```bash
@@ -149,9 +165,70 @@ gcloud storage cp /tmp/manifest.json \
 ```
 
 No redeploy is needed — the app reads the bucket at run time. Objects carry a
-one-day cache lifetime, so a change can take up to 24 h to reach browsers that
-already loaded the old copy. To force it sooner, upload under a new prefix and
-rebuild with `_PACK_BASE` pointing at it.
+one-day cache lifetime, and Google's edge caches public objects for that long
+too, so a change can take up to 24 h to reach anyone. To force it sooner,
+upload under a new prefix and rebuild with `_PACK_BASE` pointing at it.
+
+### Updating only the commute pack
+
+`scripts/build_commute_pack.py` gives its binaries content-hashed names
+(`commute_od_2019-02.<hash>.bin`), and `commute_meta.json` names the ones it
+belongs to. The binaries are unreadable without their own meta, so upload in
+this order and keep the previous build's binaries in the bucket for at least
+a day, because cached copies of the old meta still point at them:
+
+```bash
+cd public/data/pack
+# 1. New binaries. Nothing references them yet.
+gcloud storage cp commute_*.*.bin gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=86400"
+# 2. The meta, with a short cache so readers move to the new binaries quickly.
+gcloud storage cp commute_meta.json gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=300"
+```
+
+Then regenerate and upload the manifest as above. The meta's short cache
+only applies once the edge has let go of the previous copy.
+
+### Updating only the service pack
+
+Same pattern as the commute pack. `scripts/build_service_pack.py` writes one
+content-hashed pair per month (`service_<YYYY-MM>.<hash>.u16` and
+`service_routes_<YYYY-MM>.<hash>.json`), and `service_meta.json` names them.
+The client fetches only the month the time bar is on, so upload the monthly
+files first and the meta last, with a short cache:
+
+```bash
+cd public/data/pack
+gcloud storage cp service_20*.*.u16 service_routes_*.*.json gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=86400"
+gcloud storage cp service_meta.json gs://ac-transit-ridership-pack/pack/ \
+  --gzip-local-all --cache-control="public, max-age=300"
+```
+
+### After rebuilding the service months
+
+Run `python3 scripts/build_speed_pack.py` (monthly all-day speed per corridor,
+used by the selection chart) and then `python3 scripts/build_buslanes_pack.py`
+(the /buslanes page). Upload the new `speed_<era>.<hash>.u16` files first and
+`speed_meta.json` and `buslanes.json` after, like the other hashed bundles.
+
+### After rebuilding the corridors
+
+`vis/build_corridor_graph.py` writes plain road polylines. Run
+`python3 scripts/build_corridor_curves.py` afterwards: it adds the smooth
+Bezier geometry (`b`) the app draws, with pieces snapped end to end and
+through-lines tangent-continuous at nodes. It changes geometry only, so
+nothing indexed by corridor needs rebuilding. Without it the app falls back to
+the raw polylines.
+
+### After changing meta.json or the section loads
+
+Run `python3 scripts/build_pack_index.py` and upload `pack_index.json`. It
+holds the corridor colour domain over every era, which the client can no
+longer compute at startup because it loads each era's corridors on demand.
+Without it the ramp is computed from the eras loaded so far and shifts as
+more arrive.
 
 ## Verifying a deploy
 
