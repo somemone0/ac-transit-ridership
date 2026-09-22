@@ -1,4 +1,5 @@
-"""Stage 1: build mean-weekday AM (hours 5-8) BART station-to-station matrix."""
+"""Stage 1: build mean-weekday AM (hours 5-10, the app's 5-11 window) BART
+station-to-station matrix."""
 import pandas as pd
 from pandas.tseries.holiday import USFederalHolidayCalendar
 from pathlib import Path
@@ -22,7 +23,7 @@ print("raw rows:", len(df))
 
 d = pd.DatetimeIndex(df.date)
 keep = (d.dayofweek < 5) & ~d.isin(HOLIDAYS) & (d.year == YEAR)
-am = keep & (df.hour >= 5) & (df.hour <= 8)
+am = keep & (df.hour >= 5) & (df.hour <= 10)
 sub = df[am]
 nwd = pd.DatetimeIndex(sub.date).nunique()
 print("weekdays with AM data:", nwd)

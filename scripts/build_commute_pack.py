@@ -12,7 +12,7 @@ Snapshots let the commute view compare pre- and post-pandemic patterns; rerun
 this script every ~6 months (or after each new GCS month lands) and it picks
 up the newest anchor automatically.
 
-O-D inference, per (route, bit) for trips starting 5-9 a.m.:
+O-D inference, per (route, bit) for trips starting 5-11 a.m.:
   * Stop order comes from the trips themselves -- each stop's median minutes
     into the trip, over the stops at least MIN_STOP_SHARE of trips serve. The
     GTFS era sequences are missing stops the buses serve, and dropping those
@@ -84,14 +84,14 @@ from build_capture import band_of_hour, start_hour  # noqa: E402
 BUCKET = os.environ.get(
     "ACPRA_BUCKET", "gs://ac-transit-stops/partitioned-final/ac_transit_parquet"
 )
-AM = (5, 9)    # trip start hours 5..8 inclusive
-# Evening window used only to score which morning trips come back. It starts
-# at 16 rather than 15 on purpose: schools dismiss 13-16 and their round trips
-# mirror as cleanly as commutes do, so the earlier hour pulls Skyline High and
-# Montera Jr High into the workplace ranking. Measured against LODES
-# workplace-ness (log jobs/resident workers), 16-19 scores rho 0.45 where
-# 15-19 scores 0.35 and raw AM arrivals score 0.22.
-PM_WORK = (16, 19)
+AM = (5, 11)   # trip start hours 5..10 inclusive
+# Evening window used only to score which morning trips come back. Widened
+# from 16-19 to 14-22: it catches roughly half again more O-D riders, but
+# dilutes the workplace signal, because schools dismiss 13-16 and their round
+# trips mirror as cleanly as commutes do. Measured against LODES
+# workplace-ness (log jobs/resident workers), 14-22 scores rho 0.46-0.47
+# where 16-19 scores 0.49.
+PM_WORK = (14, 22)
 N_HOURS = 24
 K_GROUP = 48
 K_AREA = 24
@@ -676,7 +676,7 @@ def main():
         "periods": period_meta,
         "latest": f"{latest[0]}-{latest[1]:02d}",
         "base": "2020-02",
-        "windows": {"am": list(AM), "pm": (15, 19), "pmWork": list(PM_WORK)},
+        "windows": {"am": list(AM), "pm": list(PM_WORK), "pmWork": list(PM_WORK)},
         "hourly": hourly_section,
         "rt": rt_section,
         "od": od_meta,

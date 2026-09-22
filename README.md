@@ -27,7 +27,7 @@ binary bundle the browser can page through without a server round trip.
   Three GTFS eras (Nov 2019, Dec 2024, Aug 2025) are carried separately
   because stop sequences changed between them.
 - **Commute patterns** — average-weekday hourly boarding and alighting
-  profiles, plus inferred origin–destination flows for AM (5–9 a.m.) travel,
+  profiles, plus inferred origin–destination flows for AM (5–11 a.m.) travel,
   at half-year snapshots from Feb 2019 to the present. The map is driven by a
   2×2 grid of measures: **AC Transit workplaces / homes** (bus commuters) over
   **All workplaces / All homes** (LEHD LODES primary jobs and employed
@@ -39,13 +39,16 @@ binary bundle the browser can page through without a server round trip.
   The AC Transit row counts *net round-trip* commuters rather than everyone
   who steps off a bus in the morning: a morning arrival alone cannot separate
   a commuter from a shopper, a student, or someone changing to BART, so a trip
-  counts only when the same pair comes back in the evening (16–19), netted
+  counts only when the same pair comes back in the evening (14–22), netted
   against the same pair's opposite direction so that an all-day two-way
   corridor scores near zero. Against LODES workplace-ness — log(jobs ÷
-  resident workers) — this scores ρ 0.45 where raw morning arrivals score
+  resident workers) — this scores ρ 0.46–0.47 where raw morning arrivals score
   0.22, and it holds that across the 2019, 2023 and 2026 snapshots while raw
-  arrivals decay. The evening window starts at 16:00 on purpose: schools
-  dismiss 13–16 and their round trips mirror as cleanly as commutes do.
+  arrivals decay. The evening window runs 14:00–22:00 to catch more return
+  trips; a tighter 16–19 window scores better on LODES (ρ 0.49), because
+  schools dismiss 13–16 and their round trips mirror as cleanly as commutes.
+  The inference itself — both fits, the holdout that picks between them, and
+  the backtested error bars — is in [OD_METHODOLOGY.md](OD_METHODOLOGY.md).
 
   The LODES cells are tract-level (that is what LODES publishes). UC
   employees are absent from LODES because the university sits outside State

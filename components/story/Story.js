@@ -65,10 +65,21 @@ function ScrollySection({ data, places, steps, label, first = "85vh" }) {
       * clamp01((rect.bottom - viewport * 0.04) / (viewport * 0.18));
     api.update(scenes[active], week, { rect, alpha });
     // Keep the address bar pointed at whichever passage owns the map, so
-    // copying the URL at any point links straight back to that visual.
+    // copying the URL at any point links straight back to that visual. Only
+    // the section the trigger line crosses may write it: every section within
+    // reach of the viewport runs this, and two of them each writing their own
+    // passage would trade the hash back and forth on every scroll frame.
+    // WebKit throws once replaceState passes 100 calls in 10 seconds, and the
+    // throw surfaces as a page-level error, so a refused write is dropped --
+    // the hash is a convenience, never worth the page.
+    const owns = box.top <= trigger && box.bottom > trigger;
     const activeId = steps[active].id;
-    if (activeId && window.location.hash.slice(1) !== activeId) {
-      window.history.replaceState(null, "", `#${activeId}`);
+    if (owns && activeId && window.location.hash.slice(1) !== activeId) {
+      try {
+        window.history.replaceState(null, "", `#${activeId}`);
+      } catch {
+        // Throttled; the next step change tries again.
+      }
     }
   }, [scenes, steps]);
 

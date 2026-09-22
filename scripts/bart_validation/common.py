@@ -69,6 +69,83 @@ def gravity(B, A, mask=None):
     return T * (total / s) if s > 0 else T
 
 
+# ---- per-trip path, verbatim from scripts/build_commute_pack.py:256-325 ----
+MIN_OD_TRIPS = 20      # fewer screened trips than this -> summed fit, no holdout
+TRIP_PASSES = (3, 8)   # candidate pass counts for the per-trip fit
+
+
+def balance(B, A):
+    """Scale ons and offs to their mean total along the last axis (TCRP 113's
+    proportional balancing, which leaves average trip length unchanged)."""
+    tb, ta = B.sum(-1, keepdims=True), A.sum(-1, keepdims=True)
+    target = (tb + ta) / 2
+    return (B * np.divide(target, tb, out=np.zeros_like(tb), where=tb > 0),
+            A * np.divide(target, ta, out=np.zeros_like(ta), where=ta > 0))
+
+
+def ipf_batch(T, rows, cols, max_iter=100, tol=1e-4):
+    """Biproportional fit of seeds T (..., n, n) to rows/cols (..., n), in place."""
+    for _ in range(max_iter):
+        rs = T.sum(-1)
+        T *= np.divide(rows, rs, out=np.zeros_like(rs), where=rs > 0)[..., :, None]
+        cs = T.sum(-2)
+        T *= np.divide(cols, cs, out=np.zeros_like(cs), where=cs > 0)[..., None, :]
+        if np.abs(T.sum(-1) - rows).max() < tol:
+            break
+    return T
+
+
+def trip_bases(B, A, passes, backward=1e-3):
+    """Base matrix after each of 1..max(passes) per-trip passes: fit every
+    trip's own counts against the base, rebuild the base from the sum (Ji,
+    Mishalani & McCord 2014). The small upstream weight keeps trips with
+    locally inconsistent counts solvable; only forward mass carries over."""
+    n = B.shape[1]
+    B, A = balance(B, A)
+    i, j = np.indices((n, n))
+    fwd = (i < j).astype(float)
+    up = backward / fwd.sum() * (i > j)
+    base, out = fwd, {}
+    for k in range(1, max(passes) + 1):
+        seed = np.broadcast_to(base / base.sum() + up, (len(B), n, n)).copy()
+        base = ipf_batch(seed, B, A).sum(0) * fwd
+        if k in passes:
+            out[k] = base
+    return out
+
+
+def rake(base, boardings, alightings, backward=1e-3):
+    """Fit a base structure to boarding/alighting totals."""
+    n = len(boardings)
+    b, a = balance(np.asarray(boardings, float), np.asarray(alightings, float))
+    i, j = np.indices((n, n))
+    seed = base + base.mean() * (backward * (i > j) + 1e-9 * (i < j))
+    return ipf_batch(seed, b, a, max_iter=500, tol=1e-6)
+
+
+def holdout_rmse(T, B, A):
+    """Predict each trip's alightings from its boardings, B @ P(alight | board)."""
+    rs = T.sum(1, keepdims=True)
+    P = np.divide(T, rs, out=np.zeros_like(T), where=rs > 0)
+    B, A = balance(B, A)
+    return float(np.sqrt(((B @ P - A) ** 2).mean()))
+
+
+def choose_passes(B, A, day):
+    """0 (summed fit) or a per-trip pass count, by odd/even-day holdout."""
+    folds = (day % 2 == 0, day % 2 == 1)
+    if len(B) < MIN_OD_TRIPS or min(f.sum() for f in folds) < 5:
+        return 0
+    score = dict.fromkeys((0,) + TRIP_PASSES, 0.0)
+    for train in folds:
+        test = ~train
+        b, a = B[train].sum(0), A[train].sum(0)
+        score[0] += holdout_rmse(ipf_od(b, a), B[test], A[test])
+        for k, base in trip_bases(B[train], A[train], TRIP_PASSES).items():
+            score[k] += holdout_rmse(rake(base, b, a), B[test], A[test])
+    return min(score, key=score.get)
+
+
 def load_truth():
     m = pd.read_parquet(HERE / "od_am_matrix.parquet")
     m["orig"] = m.orig.astype(str)

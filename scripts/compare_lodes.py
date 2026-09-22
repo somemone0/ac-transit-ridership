@@ -76,8 +76,9 @@ def am_marginals(snapshot, level="tract"):
     scales = np.asarray(sec["scales"])
     wd = np.asarray([p["weekdays"] for p in cm["periods"]])
     p = [q["id"] for q in cm["periods"]].index(snapshot)
-    bd = arr[:, p, 0, 5:9].sum(axis=1) * scales / wd[p]
-    al = arr[:, p, 1, 5:9].sum(axis=1) * scales / wd[p]
+    lo, hi = cm["windows"]["am"]
+    bd = arr[:, p, 0, lo:hi].sum(axis=1) * scales / wd[p]
+    al = arr[:, p, 1, lo:hi].sum(axis=1) * scales / wd[p]
     return bd, al
 
 

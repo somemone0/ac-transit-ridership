@@ -1,20 +1,21 @@
 # BART validation of the O-D inference
 
-The explorer's origin–destination flows are inferred, not observed: `ipf_od` in
+The explorer's origin–destination flows are inferred, not observed: the pipeline in
 `../build_commute_pack.py` takes a route–direction's boarding and alighting totals and
-fits the most even flow matrix consistent with them. Nothing in the APC data says where
-anyone actually went, so on AC Transit there is nothing to check the answer against.
+fits a flow matrix consistent with them. Nothing in the APC data says where anyone
+actually went, so on AC Transit there is nothing to check the answer against.
 
 BART is the nearest system that publishes the matrix itself. Collapsing BART's real
 station-to-station counts down to per-station boardings and alightings, re-inferring
 with the same code, and scoring the reconstruction gives an error bar for the method —
 on a different network, but a real one.
 
-`REPORT.md` has the findings. The short version: the *set* of important destinations is
-reliable (top-5 overlap 0.845, and the predicted top-5 recovers 97.1% of the flow the
-true top-5 carries), individual flow numbers are not (8.9% of displayed cells are wrong
-by 2× or more), and because BART hands the method clean fare-gate marginals, its 0.281
-WMAPE is a **ceiling** — the AC Transit error is very likely worse.
+`REPORT.md` has the findings. The short version: at the shipped 5–11 a.m. window, the
+summed fit scores 0.289 WMAPE / 0.841 top-5 overlap, the per-trip path that
+`choose_passes` selects on most routes improves that to 0.262 / 0.853, and on the
+top-5 cells the UI actually displays the error is 0.216 WMAPE with 8.9% of cells wrong
+by 2× or more. Because BART hands the method clean fare-gate marginals, **all of these
+are ceilings** — the AC Transit error is very likely worse.
 
 ## Running it
 
@@ -23,52 +24,53 @@ python3 run_all.py
 ```
 
 Downloads BART's 2025 O-D file (~34 MB) and GTFS feed on first run, then executes the
-eight stages in order. Takes roughly 10–15 minutes, most of it the download. Needs
-`pandas`, `numpy`, `scipy`, `pyarrow`.
+nine stages in order. Takes roughly 10–15 minutes, most of it the download. Needs
+`pandas`, `numpy`, `scipy`, `pyarrow`. The O-D host 403s urllib's default User-Agent,
+so `run_all.py` sends a browser one.
 
 Everything it writes — inputs and derived outputs alike — is gitignored; `run_all.py`
 regenerates all of it.
 
 | Stage | Does |
 | --- | --- |
-| `stage1_truth.py` | Mean-weekday AM (05:00–08:59) matrix over 248 non-holiday weekdays → `od_am_matrix.parquet` |
+| `stage1_truth.py` | Mean-weekday AM (05:00–10:59, the app's 5–11 window) matrix over 249 non-holiday weekdays → `od_am_matrix.parquet` |
 | `stage2_lines.py` | Ordered station sequences per line-direction from GTFS |
-| `stage3_score.py` | Both IPF variants + gravity baseline; the headline metrics |
+| `stage3_score.py` | Summed IPF variants + gravity baseline; the headline metrics |
 | `stage4_sweep.py` | `backward_weight` sweep (forward-assigned — see the report, it is rigged) |
 | `stage5_backward_fair.py` | `backward_weight` sweep with realistic backward travel |
 | `stage6_diag.py` | Trip-length bias and concentration |
 | `stage7_displayed.py` | Error restricted to the top-5 cells the UI actually shows |
 | `stage8_check.py` | Confirms unconstrained IPF ≡ the gravity baseline |
+| `stage9_per_trip.py` | Per-trip path (`trip_bases`/`rake`/`choose_passes`) on synthetic trips, plus displayed-cell metrics for every branch |
 
-`common.py` holds a verbatim copy of `ipf_od` (so the test cannot silently drift from a
-reimplementation), the line-assignment rule, and every metric.
+`common.py` holds verbatim copies of `ipf_od` and the per-trip machinery (`balance`,
+`ipf_batch`, `trip_bases`, `rake`, `holdout_rmse`, `choose_passes`) so the test cannot
+silently drift from a reimplementation; it also holds the line-assignment rule and
+every metric.
 
-## What this does and does not cover
+## What this covers and does not cover
 
-This ran on **2026-09-08**, against the pipeline as it stood then. On **2026-09-11**
-`build_commute_pack.py` gained a per-trip fit, and `route_od` now chooses per
-route–direction by odd/even-day holdout:
+Both branches the pipeline ships are now exercised at the 5–11 window:
 
-- `choose_passes` returns `0` → `ipf_od(bvec, avec)`. **This is the path validated
-  here.**
-- `choose_passes` returns 3 or 8 → `rake(trip_bases(...))`, a per-trip iterated base
-  (Ji, Mishalani & McCord 2014) with `backward=1e-3`. **Not covered by this study.**
+- **Summed** (`choose_passes` returns 0) — `ipf_od` on the window totals, validated on
+  the real BART matrix itself.
+- **Per-trip** (3 or 8 passes) — covered by `stage9_per_trip.py`, which synthesizes
+  run-level boardings/alightings from the true matrix (20 weekdays × 20 runs per
+  line-direction, Poisson passenger totals). This exercises the selection mechanism
+  and the iterated-base fit, but the synthetic runs are the truth plus Poisson noise:
+  no direction-bit error, no transfers split into legs, no missed boardings. The
+  0.262 WMAPE is an upper bound for the same reason the summed fit's 0.289 is.
+- Thin lines still fall back, faithfully: the two 2-station Grey shuttles drop below
+  `MIN_OD_TRIPS` and take the summed path.
 
-So the results still describe the summed-marginal branch, which is still live, but they
-no longer describe every route. The per-trip path learns its structure from individual
-trips rather than leaning on the forward mask, so neither the `backward_weight`
-recommendation nor the U-shaped trip-length bias should be assumed to transfer to it
-without a separate test.
+Not covered:
 
-Two things worth redoing when there is reason to:
+- **The evening/round-trip side.** BART has no commuter label, so the 14–22
+  round-trip scoring and its netting cannot be scored here. That side is checked
+  against LODES workplace-ness on AC Transit itself in `../compare_lodes.py`.
+- **The `backward_weight` recommendation** (0.05–0.10, from sweep 2) has not been
+  tested against AC Transit's own holdout inside `choose_passes`, which would be a
+  better judge than BART.
 
-- **Re-run against the per-trip path.** `common.py` would need `trip_bases`/`rake`
-  alongside `ipf_od`, and BART's O-D has no per-trip structure, so this needs a
-  different design — probably synthetic trips drawn from the true matrix.
-- **The `backward_weight` question is open on the current code.** The report argues
-  0.05–0.10 for `ipf_od` on asymmetric-loss grounds. That has not been tested against
-  AC Transit's own holdout, which now exists in `choose_passes` and would be a better
-  judge than BART.
-
-Related: `../compare_lodes.py` checks inferred workplaces against LODES, which is the
-independent check on AC Transit's own network that this study cannot be.
+The earlier 5–8 study is in git history (`b9d5e89`); widening the window moved the
+summed network WMAPE 0.281 → 0.289 and changed no conclusion.
