@@ -118,6 +118,7 @@
 }
 
 .scrolly-card {
+  scroll-margin-top: 10vh;
   width: min(400px, calc(100% - 32px));
   margin-left: max(24px, 5vw);
   padding: 20px 24px;
