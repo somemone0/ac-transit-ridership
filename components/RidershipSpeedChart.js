@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { SEQ_BLUE } from "./ridership-data";
 import { T, t } from "../lib/i18n";
 
@@ -28,36 +28,20 @@ function compact(value) {
   return `${Math.round(value)}`;
 }
 
-// Time on the blue ramp, oldest month closest to the surface and the latest
-// the most contrasting: light to dark on a light surface, dark to light on a
-// dark one. The steps nearest each surface are skipped, since they do not
-// read as a dot at all.
-const TIME_RAMP_LIGHT = SEQ_BLUE.slice(3);
-const TIME_RAMP_DARK = SEQ_BLUE.slice(0, 5).reverse();
-
-function useDarkMode() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!query) return undefined;
-    const theme = () => document.documentElement.getAttribute("data-theme");
-    const update = () => setDark(theme() ? theme() === "dark" : query.matches);
-    update();
-    query.addEventListener?.("change", update);
-    return () => query.removeEventListener?.("change", update);
-  }, []);
-  return dark;
-}
+// Time on the blue ramp, oldest month closest to the dark plane and the latest
+// the most contrasting. The steps nearest the plane are skipped, since they do
+// not read as a dot at all.
+const TIME_RAMP = SEQ_BLUE.slice(0, 5).reverse();
 
 /* A connected scatterplot: each month is a dot at its average bus speed (x)
    and its average riders per week (y), joined in time order, so the path shows
-   how the two moved together. Colour runs from the surface's end of the ramp to
-   the far end through time (see TIME_RAMP_*), and the
-   first month, April 2020 and the latest month are labelled. */
+   how the two moved together. Colour runs from the plane's end of the ramp to
+   the far end through time (see TIME_RAMP), and the first month, April 2020
+   and the latest month are labelled. */
 export default function RidershipSpeedChart({ series, speed, meta, mapChanges = [] }) {
   const [hover, setHover] = useState(null);
   const svgRef = useRef(null);
-  const ramp = useDarkMode() ? TIME_RAMP_DARK : TIME_RAMP_LIGHT;
+  const ramp = TIME_RAMP;
   const timeColor = (t) => ramp[Math.min(ramp.length - 1, Math.round(t * (ramp.length - 1)))];
 
   const points = useMemo(() => {

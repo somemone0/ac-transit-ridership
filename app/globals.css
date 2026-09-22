@@ -1,29 +1,19 @@
+/* The app is dark only. The sequential and diverging ramps the map draws with
+   are picked for contrast against a dark plane -- on a light one the dots lose
+   their low end and several text colours fall below contrast -- so rather than
+   carry a second palette that is known to be wrong, there is one theme and
+   `color-scheme` pins the UA's form controls and scrollbars to it. */
 :root {
-  color-scheme: light;
-  --surface-1: #fcfcfb;
-  --plane: #f9f9f7;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #84837c;
-  --rule: #e4e3de;
-  --gold: #eda100;
-  --series-real: #2a78d6;
-  --accent: #2a78d6;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    color-scheme: dark;
-    --surface-1: #1a1a19;
-    --plane: #0d0d0d;
-    --text-primary: #fff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #8e8d84;
-    --rule: #383835;
-    --gold: #c98500;
-    --series-real: #3987e5;
-    --accent: #3987e5;
-  }
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --plane: #0d0d0d;
+  --text-primary: #fff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8e8d84;
+  --rule: #383835;
+  --gold: #c98500;
+  --series-real: #3987e5;
+  --accent: #3987e5;
 }
 
 * {
@@ -617,15 +607,11 @@ label.inline select {
   pointer-events: none;
 }
 
-.basemap-muted {
-  filter: grayscale(1) brightness(1.07) contrast(0.86);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .basemap-muted,
-  :root:where(:not([data-theme="light"])) .basemap-carto {
-    filter: grayscale(1) invert(1) brightness(0.82) contrast(0.9);
-  }
+/* Both basemaps ship as light tiles, so they are inverted to sit under the
+   dark plane. */
+.basemap-muted,
+.basemap-carto {
+  filter: grayscale(1) invert(1) brightness(0.82) contrast(0.9);
 }
 
 .leaflet-tooltip {
