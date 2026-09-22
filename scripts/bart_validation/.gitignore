@@ -1,0 +1,9 @@
+# Downloaded inputs (~35 MB) and everything the stages derive from them.
+# `python3 run_all.py` regenerates all of this.
+od-*.csv.gz
+gtfs.zip
+gtfs/
+*.parquet
+*.npy
+*.json
+*.csv
