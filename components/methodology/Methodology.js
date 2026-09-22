@@ -24,6 +24,7 @@ import katex from "katex";
 
 import RouteFigure, { C_PRA, C_ROUTE, N_PRESENT, N_TRIPS, W_IMPUTED } from "./figure";
 import HISTOGRAM from "./w-histogram.json";
+import { T, t } from "../../lib/i18n";
 
 const TRIGGER = 0.62;
 
@@ -54,39 +55,26 @@ function C({ c, children }) {
 const STEPS = [
   {
     state: "observed",
-    body: (
-      <>
-        <p>
-          This is an example of a bus route. Buses pick up and drop off people from each station. Some bus
-          trips don’t have sensor information. We can find trips that aren’t observed through schedules
-          published by AC Transit, known as GTFS feeds. These public schedules are how applications like
-          Google Maps calculate bus arrival times.
-        </p>
-      </>
-    ),
+    body: <p>{t("methodology.step.intro")}</p>,
   },
   {
     state: "observed",
-    body: (
-      <p>
-        The <C c="observed">blue bars</C> represent observed data from the trip-level public records
-        request. However, this is not a complete picture of ridership.
-      </p>
-    ),
+    body: <p><T id="methodology.step.observed" c={[<C c="observed" />]} /></p>,
   },
   {
     state: "coverage",
     body: (
       <>
         <p>
-          First, we get a <C c="coverage">coverage factor</C> of the line{" "}
-          <M>{String.raw`\textcolor{#83C167}{c_{route}} = N_{present}/N_{total}`}</M>. This is the percent
-          of trips that are covered by the route. This assumes that missing trips are similar to other
-          trips.
+          <T id="methodology.step.coverage" c={[
+            <C c="coverage" />,
+            <M>{String.raw`\textcolor{#83C167}{c_{route}} = N_{present}/N_{total}`}</M>,
+          ]} />
         </p>
         <p className="mth-aside">
-          Here {N_PRESENT} of {N_TRIPS} trips reported, so{" "}
-          <M>{String.raw`\textcolor{#83C167}{c_{route}}`}</M> is {C_ROUTE}.
+          <T id="methodology.step.coverageAside"
+            c={[<M>{String.raw`\textcolor{#83C167}{c_{route}}`}</M>]}
+            vars={{ present: N_PRESENT, total: N_TRIPS, c: C_ROUTE }} />
         </p>
       </>
     ),
@@ -95,73 +83,54 @@ const STEPS = [
     state: "coverage",
     body: (
       <p>
-        Each stop’s ridership is divided by <M>{String.raw`\textcolor{#83C167}{c_{route}}`}</M>, leading to
-        increased ridership. This keeps the distribution of the line.
+        <T id="methodology.step.coverageApplied"
+          c={[<M>{String.raw`\textcolor{#83C167}{c_{route}}`}</M>]} />
       </p>
     ),
   },
   {
     state: "calibration",
     body: (
-      <>
-        <p>
-          As a <C c="calibration">calibration factor</C>, we use the existing public records request, which
-          has an accurate count for total ridership <M>{String.raw`r_{route}`}</M> over the entire route.
-          We collect{" "}
-          <M>{String.raw`\textcolor{#5CD0B3}{c_{pra}} = (r_{observed} \cdot \textcolor{#83C167}{c_{route}}) / r_{pra}`}</M>
-          , the factor by which ridership differs from AC Transit’s published ridership. We then multiply
-          every stop by this factor.
-        </p>
-      </>
+      <p>
+        <T id="methodology.step.calibration" c={[
+          <C c="calibration" />,
+          <M>{String.raw`r_{route}`}</M>,
+          <M>{String.raw`\textcolor{#5CD0B3}{c_{pra}} = (r_{observed} \cdot \textcolor{#83C167}{c_{route}}) / r_{pra}`}</M>,
+        ]} />
+      </p>
     ),
   },
   {
     state: "sparse",
-    body: (
-      <p>
-        Some routes have significant data loss, like the routes introduced in 2025 under the Realign
-        program. For this profound data loss, we find other routes that cover the same stops. As an example,
-        the 27 and the 51B cover the same stops near UC Berkeley.
-      </p>
-    ),
+    body: <p>{t("methodology.step.sparse")}</p>,
   },
   {
     state: "donors",
-    body: (
-      <p>
-        Using the existing public records request and the GTFS schedule for the number of trips and the
-        total ridership, the distribution of ridership over the stop is estimated.
-      </p>
-    ),
+    body: <p>{t("methodology.step.donors")}</p>,
   },
   {
     state: "donorFill",
-    body: <p className="mth-aside">The <C c="donor">estimated distribution</C>, in purple.</p>,
+    body: (
+      <p className="mth-aside">
+        <T id="methodology.step.donorFill" c={[<C c="donor" />]} />
+      </p>
+    ),
   },
   {
     state: "weeks",
-    body: (
-      <p>
-        Our data is presented by week, not by month. Some weeks in a month may have 10 times the sensors
-        reporting with the same service. Because there is no calibration available, we must use our public
-        schedules.
-      </p>
-    ),
+    body: <p>{t("methodology.step.weeks")}</p>,
   },
   {
     state: "weeks",
     body: (
       <>
-        <p>We collect a percentage <M>w</M> of trips that do not meet requirements for inclusion.</p>
+        <p><T id="methodology.step.weightIntro" c={[<M>w</M>]} /></p>
         <ul className="mth-list">
-          <li>Under 40% of trips reported</li>
-          <li>Under 70% of average reported trips for that route</li>
-          <li>Under 70% of days have a single trip</li>
+          <li>{t("methodology.step.exclude1")}</li>
+          <li>{t("methodology.step.exclude2")}</li>
+          <li>{t("methodology.step.exclude3")}</li>
         </ul>
-        <p>
-          Rides in this category are weighted out and replaced with a distribution based on the level of
-          service in the <C c="schedule">published schedules</C>.
-        </p>
+        <p><T id="methodology.step.weightApplied" c={[<C c="schedule" />]} /></p>
         <Eq>
           {String.raw`r_{week} = r_{month}\bigl(\textcolor{#F0AC5F}{w \cdot p_{schedule}} + \textcolor{#58C4DD}{(1-w) \cdot p_{week}}\bigr)`}
         </Eq>
@@ -172,26 +141,25 @@ const STEPS = [
     state: "mix",
     body: (
       <>
-        <p>
-          <M>w</M> is the % imputed figure shown on the website. Ridership derived from <M>w</M> is still
-          from monthly data, and <M>w</M> is derived from the quality of the monthly data.
-        </p>
+        <p><T id="methodology.step.mix" c={[<M>w</M>, <M>w</M>, <M>w</M>]} /></p>
         <p className="mth-aside">
-          Drawn at <M>{String.raw`w = ${W_IMPUTED}`}</M>. Neither bar is invented: the{" "}
-          <C c="imputed">imputed share</C> is the same month as the <C c="real">measured</C> one, held at
-          the level the schedule expects instead of at the level the counters happened to see.
+          <T id="methodology.step.mixAside" c={[
+            <M>{String.raw`w = ${W_IMPUTED}`}</M>,
+            <C c="imputed" />,
+            <C c="real" />,
+          ]} />
         </p>
       </>
     ),
   },
-  { state: "blend", body: <p>This is what is shown on the website.</p> },
+  { state: "blend", body: <p>{t("methodology.step.blend")}</p> },
 ];
 
 const CASES = [
-  ["No data estimated (w=0)", "6,874", "61.1%"],
-  ["Some data estimated (w>0)", "1,765", "15.7%"],
-  ["All data estimated (w=1)", "2,241", "19.9%"],
-  ["No sensors at all", "325", "2.9%"],
+  ["methodology.case0", "6,874", "61.1%"],
+  ["methodology.case1", "1,765", "15.7%"],
+  ["methodology.case2", "2,241", "19.9%"],
+  ["methodology.case3", "325", "2.9%"],
 ];
 
 function Histogram() {
@@ -204,8 +172,7 @@ function Histogram() {
   const y = (v) => pad.t + (1 - v / max) * (h - pad.t - pad.b);
   return (
     <figure className="mth-hist">
-      <svg viewBox={`0 0 ${w} ${h}`} role="img"
-        aria-label="Distribution of the imputed share across route-months, with 2019 highlighted">
+      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={t("methodology.histogramAria")}>
         {all.map((value, i) => (
           <g key={i}>
             <rect className="mth-fig-bar" x={pad.l + i * bw + 1.5} width={bw - 3} y={y(value)}
@@ -217,9 +184,10 @@ function Histogram() {
           </g>
         ))}
         <rect className="mth-fig-axis" x={pad.l} y={h - pad.b} width={w - pad.l - pad.r} height={1} />
-        {[0, 0.5, 1].map((t) => (
-          <text key={t} className="mth-fig-tick" x={pad.l + t * (w - pad.l - pad.r)} y={h - pad.b + 20}>
-            {`w = ${t}`}
+        {[0, 0.5, 1].map((tick) => (
+          <text key={tick} className="mth-fig-tick" x={pad.l + tick * (w - pad.l - pad.r)}
+            y={h - pad.b + 20}>
+            {t("methodology.histogramTick", { t: tick })}
           </text>
         ))}
         <text className="mth-fig-num" x={pad.l + 2} y={y(max) - 8} textAnchor="start">
@@ -227,10 +195,10 @@ function Histogram() {
         </text>
       </svg>
       <figcaption>
-        Route-months by imputed share, all {HISTOGRAM.n_all.toLocaleString()} of them in{" "}
-        <C c="observed">blue</C> and the {HISTOGRAM.n_2019.toLocaleString()} from 2019 in{" "}
-        <C c="schedule">gold</C>. The distribution is bimodal: a route-month is usually either wholly
-        measured or wholly estimated, and 2019 supplies most of the second group.
+        <T id="methodology.histogramCaption" c={[<C c="observed" />, <C c="schedule" />]} vars={{
+          all: HISTOGRAM.n_all.toLocaleString(),
+          y2019: HISTOGRAM.n_2019.toLocaleString(),
+        }} />
       </figcaption>
     </figure>
   );
@@ -275,31 +243,20 @@ export default function Methodology() {
   return (
     <div className="mth">
       <header className="mth-hero">
-        <h1>Methodology</h1>
-        <p className="mth-kicker">AC Transit ridership · 2019–2026</p>
+        <h1>{t("methodology.title")}</h1>
+        <p className="mth-kicker">{t("methodology.kicker")}</p>
         <p className="mth-links">
-          <a href="/">Explore the map</a> · <a href="/story">Read the story</a> ·{" "}
-          <a href="/buslanes">Bus lanes</a>
+          <a href="/">{t("methodology.linkExplore")}</a> ·{" "}
+          <a href="/story">{t("methodology.linkStory")}</a> ·{" "}
+          <a href="/buslanes">{t("methodology.linkBusLanes")}</a>
         </p>
       </header>
 
       <div className="mth-intro">
-        <p>
-          At the core of this visualization is drop-offs and boardings per stop. This is collected by
-          physical sensors, known as APCs, on buses. However, this information isn’t reported all time in
-          the per-stop dataset. Importantly, the data loss is present in entire bus trips, not just at
-          specific stops.
-        </p>
-        <p>
-          To address this, <em>The Daily Californian</em> used an existing public records request that
-          collected ridership per route, per month. This ridership is derived from AC Transit’s own
-          estimation methods, and is what is reported by the agency itself.
-        </p>
-        <p>
-          The gap between the APC dataset and the per-route-month dataset is significant. 27% of boardings
-          do not exist in the APC dataset. Most of the missing data is before the pandemic.
-        </p>
-        <p className="mth-turn">We need to bridge this gap. The data loss is not uniform.</p>
+        <p>{t("methodology.intro1")}</p>
+        <p><T id="methodology.intro2" c={[<em />]} /></p>
+        <p>{t("methodology.intro3")}</p>
+        <p className="mth-turn">{t("methodology.introTurn")}</p>
       </div>
 
       <section className="mth-scrolly" ref={sectionRef}>
@@ -307,11 +264,11 @@ export default function Methodology() {
           <div className="mth-frame">
             <RouteFigure state={STEPS[active].state} />
             <p className="mth-legend">
-              <span className="mth-c mth-c-observed">observed</span>
-              <span className="mth-c mth-c-coverage">coverage factor</span>
-              <span className="mth-c mth-c-calibration">calibration</span>
-              <span className="mth-c mth-c-donor">borrowed shape</span>
-              <span className="mth-c mth-c-schedule">from the schedule</span>
+              <span className="mth-c mth-c-observed">{t("methodology.legendObserved")}</span>
+              <span className="mth-c mth-c-coverage">{t("methodology.legendCoverage")}</span>
+              <span className="mth-c mth-c-calibration">{t("methodology.legendCalibration")}</span>
+              <span className="mth-c mth-c-donor">{t("methodology.legendDonor")}</span>
+              <span className="mth-c mth-c-schedule">{t("methodology.legendSchedule")}</span>
             </p>
           </div>
         </div>
@@ -331,20 +288,20 @@ export default function Methodology() {
       </section>
 
       <section className="mth-close">
-        <p className="mth-turn">Most routes are unaffected by this imputation, and are only calibrated.</p>
+        <p className="mth-turn">{t("methodology.closeTurn")}</p>
         <div className="mth-table-wrap">
           <table className="mth-table">
             <thead>
               <tr>
-                <th>Case</th>
-                <th className="num">Route-months (e.g. Route 51B, Jan 2020)</th>
-                <th className="num">%</th>
+                <th>{t("methodology.colCase")}</th>
+                <th className="num">{t("methodology.colRouteMonths")}</th>
+                <th className="num">{t("methodology.colPercent")}</th>
               </tr>
             </thead>
             <tbody>
               {CASES.map(([label, n, pct]) => (
                 <tr key={label}>
-                  <td>{label}</td>
+                  <td>{t(label)}</td>
                   <td className="num">{n}</td>
                   <td className="num">{pct}</td>
                 </tr>
@@ -353,11 +310,8 @@ export default function Methodology() {
           </table>
         </div>
         <Histogram />
-        <p className="mth-links"><a href="/">Explore the map →</a></p>
-        <p className="mth-foot">
-          Code is MIT; data is CC BY 4.0. The counter records originate with the Alameda–Contra Costa
-          Transit District. This project is not affiliated with or endorsed by AC Transit.
-        </p>
+        <p className="mth-links"><a href="/">{t("methodology.linkExploreArrow")}</a></p>
+        <p className="mth-foot">{t("methodology.footer")}</p>
       </section>
     </div>
   );

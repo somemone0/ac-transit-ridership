@@ -2,13 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PACK } from "../ridership-data";
-
-const MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
+import { T, t } from "../../lib/i18n";
 
 function monthLabel(id) {
-  if (!id) return "–";
+  if (!id) return t("numbers.missing");
   const [year, month] = id.split("-").map(Number);
-  return `${MONTHS[month - 1]} ${year}`;
+  return t("dates.monthYear", { month: t(`dates.monthsShort.${month - 1}`), year });
 }
 
 function pct(after, before) {
@@ -17,9 +16,11 @@ function pct(after, before) {
 }
 
 function signed(value, digits = 1) {
-  if (value === null || !Number.isFinite(value)) return "–";
-  const text = Math.abs(value).toFixed(digits);
-  return value > 0 ? `+${text}%` : value < 0 ? `−${text}%` : `${text}%`;
+  if (value === null || !Number.isFinite(value)) return t("numbers.missing");
+  const n = Math.abs(value).toFixed(digits);
+  if (value > 0) return t("numbers.percentUp", { n });
+  if (value < 0) return t("numbers.percentDown", { n });
+  return t("numbers.percentFlat", { n });
 }
 
 /* ------------------------------------------------------------ dumbbell */
@@ -43,24 +44,24 @@ function Dumbbell({ lanes }) {
   const height = top + rows.length * rowH + 10;
   const x = (mph) => left + ((mph - lo) / (hi - lo)) * (width - left - right);
   const ticks = [];
-  for (let t = lo; t <= hi; t += 1) ticks.push(t);
+  for (let tick = lo; tick <= hi; tick += 1) ticks.push(tick);
 
   return (
     <div className="bl-figure">
       <div className="bl-legend" aria-hidden="true">
-        <span><i className="bl-key-dot before" />12 months before the lane</span>
-        <span><i className="bl-key-dot after" />12 months after</span>
+        <span><i className="bl-key-dot before" />{t("busLanes.legendBefore")}</span>
+        <span><i className="bl-key-dot after" />{t("busLanes.legendAfter")}</span>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="bl-svg" role="img"
-        aria-label="Average bus speed on each bus lane before and after it was added">
-        {ticks.map((t) => (
-          <g key={t}>
-            <line x1={x(t)} x2={x(t)} y1={top - 6} y2={height - 6} className="bl-grid" />
-            <text x={x(t)} y={top - 12} className="bl-tick" textAnchor="middle">{t}</text>
+        aria-label={t("busLanes.dumbbellAria")}>
+        {ticks.map((tick) => (
+          <g key={tick}>
+            <line x1={x(tick)} x2={x(tick)} y1={top - 6} y2={height - 6} className="bl-grid" />
+            <text x={x(tick)} y={top - 12} className="bl-tick" textAnchor="middle">{tick}</text>
           </g>
         ))}
-        <text x={changeX} y={top - 12} className="bl-tick strong" textAnchor="end">Change</text>
-        <text x={networkX} y={top - 12} className="bl-tick strong" textAnchor="end">Network</text>
+        <text x={changeX} y={top - 12} className="bl-tick strong" textAnchor="end">{t("busLanes.colChange")}</text>
+        <text x={networkX} y={top - 12} className="bl-tick strong" textAnchor="end">{t("busLanes.colNetwork")}</text>
         {rows.map((lane, index) => {
           const y = top + index * rowH + rowH / 2;
           const change = pct(lane.after.mph, lane.before.mph);
@@ -78,7 +79,9 @@ function Dumbbell({ lanes }) {
             >
               <rect x={0} y={y - rowH / 2} width={width} height={rowH} className="bl-hit" />
               <text x={0} y={y - 3} className="bl-row-name">{lane.name}</text>
-              <text x={0} y={y + 13} className="bl-row-sub">{lane.city} · {monthLabel(lane.installed)}</text>
+              <text x={0} y={y + 13} className="bl-row-sub">
+                {t("busLanes.laneSubtitle", { city: lane.city, month: monthLabel(lane.installed) })}
+              </text>
               <line x1={x(lane.before.mph)} x2={x(lane.after.mph)} y1={y} y2={y} className="bl-link" />
               <circle cx={x(lane.before.mph)} cy={y} r={5} className="bl-dot before" />
               <circle cx={x(lane.after.mph)} cy={y} r={5} className="bl-dot after" />
@@ -104,10 +107,7 @@ function Dumbbell({ lanes }) {
           );
         })}
       </svg>
-      <p className="bl-caption">
-        Average bus speed in miles per hour, all day, including time at stops and lights. “Network” is the change
-        across every AC Transit street over the same months.
-      </p>
+      <p className="bl-caption">{t("busLanes.dumbbellCaption")}</p>
     </div>
   );
 }
@@ -150,7 +150,7 @@ function LaneChart({ lane, network, months }) {
   const after = band(lane.after.from, lane.after.to);
   const yTicks = [];
   const step = hi - lo > 6 ? 2 : 1;
-  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) yTicks.push(t);
+  for (let tick = Math.ceil(lo / step) * step; tick <= hi; tick += step) yTicks.push(tick);
   const years = months.map((id, index) => [id, index]).filter(([id]) => id.endsWith("-01"));
 
   const onMove = (event) => {
@@ -171,7 +171,7 @@ function LaneChart({ lane, network, months }) {
           viewBox={`0 0 ${width} ${height}`}
           className="bl-svg"
           role="img"
-          aria-label={`Monthly average bus speed on ${lane.name} and across the network, 2019 to 2026`}
+          aria-label={t("busLanes.laneChartAria", { name: lane.name })}
           onPointerMove={onMove}
           onPointerLeave={() => setAt(null)}
         >
@@ -181,10 +181,10 @@ function LaneChart({ lane, network, months }) {
           {after ? (
             <rect x={x(after[0])} width={x(after[1]) - x(after[0])} y={pad.top} height={height - pad.top - pad.bottom} className="bl-band" />
           ) : null}
-          {yTicks.map((t) => (
-            <g key={t}>
-              <line x1={pad.left} x2={width - pad.right} y1={y(t)} y2={y(t)} className="bl-grid" />
-              <text x={pad.left - 6} y={y(t) + 3} textAnchor="end" className="bl-tick">{t}</text>
+          {yTicks.map((tick) => (
+            <g key={tick}>
+              <line x1={pad.left} x2={width - pad.right} y1={y(tick)} y2={y(tick)} className="bl-grid" />
+              <text x={pad.left - 6} y={y(tick) + 3} textAnchor="end" className="bl-tick">{tick}</text>
             </g>
           ))}
           {years.map(([id, index]) => (
@@ -193,7 +193,7 @@ function LaneChart({ lane, network, months }) {
           {installed >= 0 ? (
             <g>
               <line x1={x(installed)} x2={x(installed)} y1={pad.top} y2={height - pad.bottom} className="bl-install" />
-              <text x={x(installed) + 4} y={pad.top + 9} className="bl-tick strong">Lane added</text>
+              <text x={x(installed) + 4} y={pad.top + 9} className="bl-tick strong">{t("busLanes.laneAdded")}</text>
             </g>
           ) : null}
           <path d={path(net)} className="bl-line network" />
@@ -210,8 +210,10 @@ function LaneChart({ lane, network, months }) {
         {at !== null ? (
           <div className="bl-tooltip" style={{ left: `${(x(at) / width) * 100}%` }}>
             <div className="bl-tooltip-title">{monthLabel(months[at])}</div>
-            <div><i className="bl-key-line lane" /><b>{Number.isFinite(series[at]) ? `${series[at].toFixed(1)} mph` : "–"}</b> {lane.name}</div>
-            <div><i className="bl-key-line network" /><b>{Number.isFinite(net[at]) ? `${net[at].toFixed(1)} mph` : "–"}</b> Network</div>
+            <div><i className="bl-key-line lane" />
+              <b>{Number.isFinite(series[at]) ? t("units.mph", { n: series[at].toFixed(1) }) : t("numbers.missing")}</b> {lane.name}</div>
+            <div><i className="bl-key-line network" />
+              <b>{Number.isFinite(net[at]) ? t("units.mph", { n: net[at].toFixed(1) }) : t("numbers.missing")}</b> {t("busLanes.colNetwork")}</div>
           </div>
         ) : null}
       </div>
@@ -229,7 +231,9 @@ export default function BusLanes() {
     let cancelled = false;
     fetch(`${PACK}/buslanes.json`)
       .then((response) => {
-        if (!response.ok) throw new Error(`Could not load buslanes.json (${response.status})`);
+        if (!response.ok) {
+          throw new Error(t("errors.loadFailed", { name: "buslanes.json", status: response.status }));
+        }
         return response.json();
       })
       .then((json) => { if (!cancelled) setData(json); })
@@ -242,31 +246,31 @@ export default function BusLanes() {
   return (
     <article className="bl">
       <header className="bl-hero">
-        <p className="bl-kicker">AC Transit, 2019–2026</p>
-        <h1>Bus lanes and bus speeds</h1>
-        <p className="bl-lede">
-          Four streets in the AC Transit service area gained bus lanes with a documented start date between 2019
-          and 2026. This page compares how fast buses moved on each in the year before and the year after.
+        <p className="bl-kicker">{t("busLanes.kicker")}</p>
+        <h1>{t("busLanes.title")}</h1>
+        <p className="bl-lede">{t("busLanes.lede")}</p>
+        <p className="bl-links">
+          <a href="/">{t("busLanes.linkExplore")}</a> · <a href="/story">{t("busLanes.linkStory")}</a>
+          {" · "}<a href="/methodology">{t("busLanes.linkMethodology")}</a>
         </p>
-        <p className="bl-links"><a href="/">Explore the map</a> · <a href="/story">Read the story</a> · <a href="/methodology">Methodology</a></p>
       </header>
 
-      {error ? <p className="bl-error">The data could not be loaded: {error.message}</p> : null}
-      {!data && !error ? <p className="bl-loading">Loading…</p> : null}
+      {error ? <p className="bl-error">{t("busLanes.error", { message: error.message })}</p> : null}
+      {!data && !error ? <p className="bl-loading">{t("busLanes.loading")}</p> : null}
 
       {data ? (
         <>
           <section className="bl-section">
-            <h2>Speed before and after</h2>
+            <h2>{t("busLanes.headingBeforeAfter")}</h2>
             <Dumbbell lanes={lanes} />
           </section>
 
           <section className="bl-section">
-            <h2>Month by month</h2>
+            <h2>{t("busLanes.headingMonthly")}</h2>
             <div className="bl-legend" aria-hidden="true">
-              <span><i className="bl-key-line lane" />Bus lane street</span>
-              <span><i className="bl-key-line network" />All AC Transit streets</span>
-              <span><i className="bl-key-band" />Before and after windows</span>
+              <span><i className="bl-key-line lane" />{t("busLanes.legendLane")}</span>
+              <span><i className="bl-key-line network" />{t("busLanes.legendNetwork")}</span>
+              <span><i className="bl-key-band" />{t("busLanes.legendBands")}</span>
             </div>
             <div className="bl-grid-charts">
               {lanes.map((lane) => (
@@ -276,28 +280,29 @@ export default function BusLanes() {
           </section>
 
           <section className="bl-section">
-            <h2>The lanes</h2>
+            <h2>{t("busLanes.headingLanes")}</h2>
             <div className="bl-table-wrap">
               <table className="bl-table">
                 <thead>
                   <tr>
-                    <th>Street</th>
-                    <th>Installed</th>
-                    <th className="num">Before</th>
-                    <th className="num">After</th>
-                    <th className="num">Change</th>
-                    <th className="num">Network</th>
+                    <th>{t("busLanes.colStreet")}</th>
+                    <th>{t("busLanes.colInstalled")}</th>
+                    <th className="num">{t("busLanes.colBefore")}</th>
+                    <th className="num">{t("busLanes.colAfter")}</th>
+                    <th className="num">{t("busLanes.colChange")}</th>
+                    <th className="num">{t("busLanes.colNetwork")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lanes.map((lane) => (
                     <tr key={lane.id}>
                       <td>
-                        <b>{lane.name}</b>, {lane.city}
+                        <T id="busLanes.laneRowName" c={[<b />]}
+                          vars={{ name: lane.name, city: lane.city }} />
                         <div className="bl-sub">{lane.extent}</div>
                         {lane.note ? <div className="bl-sub">{lane.note}</div> : null}
                         <div className="bl-sub">
-                          Sources:{" "}
+                          {t("busLanes.sources")}{" "}
                           {lane.sources.map((source, index) => (
                             <span key={source.url}>
                               {index ? "; " : ""}
@@ -308,14 +313,17 @@ export default function BusLanes() {
                       </td>
                       <td>{lane.installed_label}</td>
                       <td className="num">
-                        {lane.before.mph ? `${lane.before.mph.toFixed(1)} mph` : "–"}
-                        <div className="bl-sub">{monthLabel(lane.before.from)}–{monthLabel(lane.before.to)}</div>
+                        {lane.before.mph ? t("units.mph", { n: lane.before.mph.toFixed(1) }) : t("numbers.missing")}
+                        <div className="bl-sub">{t("dates.monthRange", {
+                          from: monthLabel(lane.before.from), to: monthLabel(lane.before.to) })}</div>
                       </td>
                       <td className="num">
-                        {lane.after.mph ? `${lane.after.mph.toFixed(1)} mph` : "–"}
+                        {lane.after.mph ? t("units.mph", { n: lane.after.mph.toFixed(1) }) : t("numbers.missing")}
                         <div className="bl-sub">
-                          {monthLabel(lane.after.from)}–{monthLabel(lane.after.to)}
-                          {lane.after.months < data.window ? ` (${lane.after.months} months)` : ""}
+                          {t("dates.monthRange", {
+                            from: monthLabel(lane.after.from), to: monthLabel(lane.after.to) })}
+                          {lane.after.months < data.window
+                            ? t("busLanes.partialMonths", { n: lane.after.months }) : ""}
                         </div>
                       </td>
                       <td className="num">{signed(pct(lane.after.mph, lane.before.mph))}</td>
@@ -326,46 +334,25 @@ export default function BusLanes() {
               </table>
             </div>
 
-            <h3>Other bus lanes without a start date</h3>
-            <p>
-              These are mapped as bus lanes in OpenStreetMap, but no source gave a date they were added, so they are
-              not compared.
-            </p>
+            <h3>{t("busLanes.headingUndated")}</h3>
+            <p>{t("busLanes.undatedNote")}</p>
             <ul className="bl-undated">
               {data.undated.map((lane) => (
                 <li key={lane.name}>
-                  <b>{lane.name}</b>, {lane.city} ({lane.osm_km.toFixed(2)} km mapped). {lane.note}
+                  <T id="busLanes.undatedItem" c={[<b />]} vars={{
+                    name: lane.name, city: lane.city,
+                    km: lane.osm_km.toFixed(2), note: lane.note }} />
                 </li>
               ))}
             </ul>
           </section>
 
           <section className="bl-section bl-method">
-            <h2>How this was measured</h2>
-            <p>
-              Speeds come from AC Transit’s automatic passenger counters. For each trip, the time between the doors
-              opening at one stop and the next is divided into the distance between them, so the figures include
-              time spent at stops and traffic lights. They are averaged by month over every trip on each street,
-              weighted by how much service runs at each time of day.
-            </p>
-            <p>
-              A street segment counts as part of a lane when most of it lies within 15 meters of the lane as mapped in
-              OpenStreetMap. “Before” is the 12 months ending the month before the lane was added and “after” the 12
-              months starting the month after; the month itself is left out.
-            </p>
-            <p>
-              A before-and-after comparison cannot separate a lane from everything else that changed at the same time.
-              Traffic fell sharply across the region in 2020, when the International Blvd. and Broadway lanes opened;
-              the 1T replaced the local route 1 with fewer stops the same day Tempo opened; and AC Transit redesigned its
-              routes in August 2025, around the Durant Ave. and Bancroft Way projects. The network column shows how
-              speeds changed everywhere over the same months, for comparison.
-            </p>
-            <p>
-              The street map these speeds are measured on was updated in January 2022 and April 2025. A street’s speed
-              can shift a little at those dates because its segments are drawn differently, not because buses changed
-              speed. The Durant Ave. and Bancroft Way comparisons span the April 2025 update, so treat their small
-              changes with extra caution.
-            </p>
+            <h2>{t("busLanes.headingMethod")}</h2>
+            <p>{t("busLanes.method1")}</p>
+            <p>{t("busLanes.method2")}</p>
+            <p>{t("busLanes.method3")}</p>
+            <p>{t("busLanes.method4")}</p>
             <p className="bl-sub">{data.osm_note}</p>
           </section>
         </>

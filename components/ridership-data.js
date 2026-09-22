@@ -2,6 +2,8 @@
 // a local checkout with `npm run fetch:pack` works with no configuration; the
 // deployed app points this at the public GCS bucket instead, which keeps the
 // 55 MB bundle out of the container image and lets the browser cache it.
+import { t } from "../lib/i18n";
+
 export const PACK = (process.env.NEXT_PUBLIC_PACK_BASE || "/data/pack").replace(/\/$/, "");
 
 export const M = { BDR: 0, BDI: 1, ALR: 2, ALI: 3 };
@@ -115,13 +117,13 @@ export function escapeHtml(value) {
 
 async function getJson(name) {
   const response = await fetch(`${PACK}/${name}`);
-  if (!response.ok) throw new Error(`Could not load ${name} (${response.status})`);
+  if (!response.ok) throw new Error(t("errors.loadFailed", { name, status: response.status }));
   return response.json();
 }
 
 async function getBinary(name, Type) {
   const response = await fetch(`${PACK}/${name}`);
-  if (!response.ok) throw new Error(`Could not load ${name} (${response.status})`);
+  if (!response.ok) throw new Error(t("errors.loadFailed", { name, status: response.status }));
   return new Type(await response.arrayBuffer());
 }
 
@@ -1402,10 +1404,14 @@ export function periodHours(period, periods = []) {
 }
 
 export function formatHeadway(minutes) {
-  if (minutes === null || minutes === undefined) return "no service";
-  return minutes >= 90 ? `${(minutes / 60).toFixed(1)} h` : `${Math.round(minutes)} min`;
+  if (minutes === null || minutes === undefined) return t("units.noService");
+  return minutes >= 90
+    ? t("units.hours", { n: (minutes / 60).toFixed(1) })
+    : t("units.minutes", { n: Math.round(minutes) });
 }
 
 export function formatMph(mph) {
-  return mph === null || mph === undefined ? "-" : `${mph.toFixed(1)} mph`;
+  return mph === null || mph === undefined
+    ? t("units.noValue")
+    : t("units.mph", { n: mph.toFixed(1) });
 }

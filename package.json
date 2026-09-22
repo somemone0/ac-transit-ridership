@@ -8,7 +8,8 @@
     "start": "next start",
     "fetch:pack": "node scripts/fetch-pack.mjs",
     "sync:pack": "node scripts/sync-pack.mjs",
-    "build:commute": "python3 scripts/build_commute_pack.py"
+    "build:commute": "python3 scripts/build_commute_pack.py",
+    "check:strings": "node scripts/check-strings.mjs"
   },
   "dependencies": {
     "katex": "^0.18.7",

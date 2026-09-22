@@ -1,4 +1,6 @@
 /* Figures for the methodology page. All server-rendered inline SVG: no client
+import { T, t } from "../../lib/i18n";
+
    JS, no chart library, and every mark inherits the page's colour tokens so
    the diagrams follow the light/dark theme with the rest of the site.
 
@@ -79,26 +81,22 @@ export function PipelineFlow() {
     <Figure
       width={722}
       height={232}
-      label="Flow diagram of the ridership pipeline from raw counter events to the packed bundle"
-      caption={
-        <>
-          The two paths are independent estimates of the same ridership, so they are selected between and
-          blended, never added. The counters decide distribution; the control decides level.
-        </>
-      }
+      label={t("diagrams.pipelineAria")}
+      caption={t("diagrams.pipelineCaption")}
     >
       <defs>
         <Head id="mdg-h1" />
         <Head id="mdg-h1f" faint />
       </defs>
 
-      <Box x={0} y={26} title="Raw APC events" sub="5.9 GB · 89 months" />
-      <Box x={150} y={26} title="Capture correction" sub="÷ ĉ per route-month" />
-      <Box x={300} y={26} title="Calibration" sub="level ← PRA control" />
-      <Box x={0} y={136} title="PRA control" sub="+ GTFS calendars" tone="alt" />
-      <Box x={150} y={136} title="Reconstruction" sub="no counters at all" tone="alt" />
-      <Box x={450} y={81} title="Weekly blend" sub="shape ← both" tone="key" />
-      <Box x={600} y={81} title="Packed bundle" sub="u16 · u8 arrays" />
+      <Box x={0} y={26} title={t("diagrams.stepRaw")} sub={t("diagrams.stepRawSub")} />
+      <Box x={150} y={26} title={t("diagrams.stepCapture")} sub={t("diagrams.stepCaptureSub")} />
+      <Box x={300} y={26} title={t("diagrams.stepCalibration")} sub={t("diagrams.stepCalibrationSub")} />
+      <Box x={0} y={136} title={t("diagrams.stepPra")} sub={t("diagrams.stepPraSub")} tone="alt" />
+      <Box x={150} y={136} title={t("diagrams.stepReconstruction")}
+        sub={t("diagrams.stepReconstructionSub")} tone="alt" />
+      <Box x={450} y={81} title={t("diagrams.stepBlend")} sub={t("diagrams.stepBlendSub")} tone="key" />
+      <Box x={600} y={81} title={t("diagrams.stepBundle")} sub={t("diagrams.stepBundleSub")} />
 
       <Arrow id="mdg-h1" d="M118,49 H146" />
       <Arrow id="mdg-h1" d="M268,49 H296" />
@@ -109,10 +107,10 @@ export function PipelineFlow() {
       <Arrow id="mdg-h1f" dashed d="M118,150 C190,150 214,62 296,62" />
 
       <text x={59} y={16} className="mdg-lane" textAnchor="middle">
-        MEASURED
+        {t("diagrams.laneMeasured")}
       </text>
       <text x={59} y={204} className="mdg-lane alt" textAnchor="middle">
-        MODELLED
+        {t("diagrams.laneModelled")}
       </text>
     </Figure>
   );
@@ -169,22 +167,15 @@ export function CaptureGrid() {
     <Figure
       width={722}
       height={210}
-      label="Grid of scheduled trip slots by service day, with the slots whose counter reported marked"
-      caption={
-        <>
-          Each square is one scheduled trip on one day. Filled where the counter reported at least one
-          boarding for the whole trip, hollow where it reported nothing — which means a dead counter, not
-          an empty bus. Whole rows and columns go dark together because a counter fails for a bus-day at a
-          time.
-        </>
-      }
+      label={t("diagrams.captureAria")}
+      caption={t("diagrams.captureCaption")}
     >
       <text x={x0} y={20} className="mdg-small">
-        one route · one direction · one month · weekdays
+        {t("diagrams.captureScope")}
       </text>
       {cells}
       <text x={x0} y={y0 + slots * ch + 14} className="mdg-tick">
-        service days →
+        {t("diagrams.captureDays")}
       </text>
       <text
         x={-(y0 + (slots * ch) / 2)}
@@ -193,25 +184,25 @@ export function CaptureGrid() {
         textAnchor="middle"
         transform="rotate(-90)"
       >
-        trip slots
+        {t("diagrams.captureSlots")}
       </text>
 
       <g transform="translate(360,0)">
         <line x1={-18} x2={-18} y1={22} y2={178} className="mdg-rule" />
         <text x={8} y={40} className="mdg-stat-l">
-          reporting
+          {t("diagrams.captureReporting")}
         </text>
         <text x={8} y={62} className="mdg-stat">
-          {good} <tspan className="mdg-stat-l">of</tspan> {total}
+          {good} <tspan className="mdg-stat-l">{t("diagrams.captureOf")}</tspan> {total}
         </text>
         <text x={8} y={94} className="mdg-stat-l">
-          capture fraction
+          {t("diagrams.captureFraction")}
         </text>
         <text x={8} y={116} className="mdg-stat accent">
           ĉ = {c.toFixed(3)}
         </text>
         <text x={8} y={148} className="mdg-stat-l">
-          a stop counting {raw} boardings
+          {t("diagrams.captureStop", { n: raw })}
         </text>
         <text x={8} y={170} className="mdg-stat">
           {raw} ÷ {c.toFixed(3)} ={" "}
@@ -301,16 +292,16 @@ function Panel({ x, title, values, split, uptime }) {
       {uptime ? (
         <>
           <text x={x + pw + 4} y={by(UPTIME[8] * hi * 0.92) + 3.5} className="mdg-note">
-            uptime
+            {t("diagrams.blendUptime")}
           </text>
           <text x={bx(4) + bw / 2} y={by(BEFORE[4]) - 8} className="mdg-note" textAnchor="middle">
-            39.6% up
+            {t("diagrams.blendUpHigh")}
           </text>
           {/* W20's bar is too short to label above it without landing on the
               uptime line, so the label sits clear and points down to it. */}
           <line x1={bx(6) + bw / 2} x2={bx(6) + bw / 2} y1={by(0.72)} y2={by(0.26)} className="mdg-leader" />
           <text x={bx(6) + bw / 2} y={by(0.78)} className="mdg-note" textAnchor="middle">
-            5.3% up
+            {t("diagrams.blendUpLow")}
           </text>
         </>
       ) : null}
@@ -323,28 +314,20 @@ export function BlendChart() {
     <Figure
       width={722}
       height={252}
-      label="Weekly boardings before and after the blend, against counter uptime"
-      caption={
-        <>
-          Weekly boardings, millions, spring 2019. Left: the month-grain correction read at week grain —
-          the dotted line is the share of trips whose counter reported, and the bars follow it, not the
-          riders. Scheduled service across these weeks was flat at about 46,600 trips. Right: the same
-          weeks after the blend, split <span className="mdg-k real" /> observed and{" "}
-          <span className="mdg-k imputed" /> imputed. The two panels sum to the same month totals.
-          Schematic apart from the two labelled weeks, which are measured.
-        </>
-      }
+      label={t("diagrams.blendAria")}
+      caption={<T id="diagrams.blendCaption"
+        c={[<span className="mdg-k real" />, <span className="mdg-k imputed" />]} />}
     >
-      <Panel x={46} title="Reported — tracks the counters" values={BEFORE} uptime />
-      <Panel x={398} title="After the blend — tracks the service" values={AFTER} split />
+      <Panel x={46} title={t("diagrams.blendPanelBefore")} values={BEFORE} uptime />
+      <Panel x={398} title={t("diagrams.blendPanelAfter")} values={AFTER} split />
       <g>
         <path d="M46,222 v8 H346 v-8" className="mdg-brace" />
         <path d="M398,222 v8 H698 v-8" className="mdg-brace" />
         <text x={196} y={246} className="mdg-note" textAnchor="middle">
-          month total
+          {t("diagrams.blendMonthTotal")}
         </text>
         <text x={548} y={246} className="mdg-note" textAnchor="middle">
-          month total — identical
+          {t("diagrams.blendMonthTotalSame")}
         </text>
       </g>
     </Figure>
@@ -393,22 +376,15 @@ export function OdDiagram() {
     <Figure
       width={722}
       height={236}
-      label="Boardings and alightings along a route, and the fitted origin-destination matrix"
-      caption={
-        <>
-          Left: one route-direction's average morning profile — boardings above the line, alightings
-          below. Right: the flow matrix fitted to it. Only the upper triangle can be filled, because a
-          rider cannot get off before they get on; the row sums are the boardings and the column sums the
-          alightings. The matrix shown was produced by running the fit in §2.4 on the profile beside it.
-        </>
-      }
+      label={t("diagrams.odAria")}
+      caption={t("diagrams.odCaption")}
     >
       <defs>
         <Head id="mdg-h4" />
       </defs>
 
       <text x={sx} y={22} className="mdg-panel-t">
-        What the counters see
+        {t("diagrams.odCounters")}
       </text>
       <line x1={sx - 8} x2={sx + (n - 1) * pitch + 14} y1={sy} y2={sy} className="mdg-route" />
       {b.map((v, i) => {
@@ -429,22 +405,22 @@ export function OdDiagram() {
         );
       })}
       <text x={sx - 14} y={sy - 44} className="mdg-tick">
-        on
+        {t("diagrams.odOn")}
       </text>
       <text x={sx - 14} y={sy + 40} className="mdg-tick">
-        off
+        {t("diagrams.odOff")}
       </text>
       <text x={sx} y={sy + 84} className="mdg-note">
-        stops in the order the buses reach them
+        {t("diagrams.odStops")}
       </text>
 
       <Arrow id="mdg-h4" d="M352,110 H392" />
       <text x={372} y={100} className="mdg-note" textAnchor="middle">
-        fit
+        {t("diagrams.odFit")}
       </text>
 
       <text x={gx} y={22} className="mdg-panel-t">
-        What is inferred
+        {t("diagrams.odInferred")}
       </text>
       {Array.from({ length: n }, (_, i) =>
         Array.from({ length: n }, (_, j) => {
@@ -474,10 +450,10 @@ export function OdDiagram() {
         </text>
       ))}
       <text x={gx - 7} y={gy - 6} className="mdg-tick" textAnchor="end">
-        from
+        {t("diagrams.odFrom")}
       </text>
       <text x={gx + n * cell + 8} y={gy - 6} className="mdg-tick">
-        to
+        {t("diagrams.odTo")}
       </text>
       {b.map((v, i) => (
         <text key={`rs${i}`} x={gx + n * cell + 8} y={gy + i * cell + 14} className="mdg-tick num">
@@ -508,24 +484,15 @@ export function CorridorDiagram() {
       width={722}
       height={200}
       minWidth={520}
-      label="Three separate route shapes on one street, and the single matched corridor they become"
-      caption={
-        <>
-          Left: GTFS gives every route its own polyline, so three routes down one street are three
-          near-parallel lines and “same road” is not answerable from the shapes. Right: each pattern is
-          map-matched onto the OpenStreetMap network, so a stretch of road becomes an edge id and routes
-          sharing it merge by set union. The corridor is cut wherever its contributing set changes, which
-          puts a node at every stop group and every junction — and makes the onboard load constant between
-          nodes.
-        </>
-      }
+      label={t("diagrams.corridorAria")}
+      caption={t("diagrams.corridorCaption")}
     >
       <defs>
         <Head id="mdg-h5" />
       </defs>
       <g transform="translate(20,0)">
         <text x={0} y={22} className="mdg-panel-t">
-          Three shapes
+          {t("diagrams.corridorThree")}
         </text>
         <g className="mdg-shapes">
           <path d={street} transform="translate(0,-4.5)" />
@@ -533,18 +500,18 @@ export function CorridorDiagram() {
           <path d={street} transform="translate(0,4.5)" />
         </g>
         <text x={0} y={166} className="mdg-note">
-          3 routes · 3 polylines · no shared identity
+          {t("diagrams.corridorThreeSub")}
         </text>
       </g>
 
       <Arrow id="mdg-h5" d="M336,60 H386" />
       <text x={361} y={50} className="mdg-note" textAnchor="middle">
-        HMM
+        {t("diagrams.corridorHmm")}
       </text>
 
       <g transform="translate(400,0)">
         <text x={0} y={22} className="mdg-panel-t">
-          One corridor
+          {t("diagrams.corridorOne")}
         </text>
         {/* One line whose width is the riders on board, stepping only at a
             node -- where a route joins or leaves, or a stop group sits. */}
@@ -560,13 +527,13 @@ export function CorridorDiagram() {
           <circle key={cx} cx={cx} cy={cy} r={4.4} className="mdg-node" />
         ))}
         <text x={0} y={132} className="mdg-note">
-          routes join
+          {t("diagrams.corridorJoin")}
         </text>
         <text x={186} y={13} className="mdg-note">
-          one leaves
+          {t("diagrams.corridorLeave")}
         </text>
         <text x={0} y={166} className="mdg-note">
-          width = riders on board · node = where it changes
+          {t("diagrams.corridorWidth")}
         </text>
       </g>
     </Figure>

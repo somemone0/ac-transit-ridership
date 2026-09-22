@@ -72,6 +72,7 @@ import {
   selectionSeries,
   totalAt,
 } from "./ridership-data";
+import { T, t } from "../lib/i18n";
 
 // Optional CARTO basemap key. Unset (the default) falls back to the
 // plain OSM tile server, which needs no credential.
@@ -118,17 +119,25 @@ function StatRows({ data, level, keyIndex, week }) {
   const baseline = totalAt(data, level, keyIndex, data.BASE);
   return (
     <>
-      <Row label="Boardings">
+      <Row label={t("explorer.rowBoardings")}>
         <DisclosureValue real={boardReal} imp={boardImp} />
       </Row>
-      <Row label="Drop-offs">
+      <Row label={t("explorer.rowDropOffs")}>
         <DisclosureValue real={alightReal} imp={alightImp} />
       </Row>
-      <Row label="Ridership">
+      <Row label={t("explorer.rowRidership")}>
         <DisclosureValue real={boardReal + alightReal} imp={imputed} />
       </Row>
-      <Row label="Imputed">{total > 0 ? `${(100 * imputed / total).toFixed(1)}%` : "-"}</Row>
-      <Row label="vs Feb 2020">{baseline > 0 ? `${(100 * total / baseline).toFixed(0)}%` : "-"}</Row>
+      <Row label={t("explorer.rowImputed")}>
+        {total > 0
+          ? t("numbers.percentFlat", { n: (100 * imputed / total).toFixed(1) })
+          : t("units.noValue")}
+      </Row>
+      <Row label={t("explorer.rowVsBaseline")}>
+        {baseline > 0
+          ? t("numbers.percentFlat", { n: (100 * total / baseline).toFixed(0) })
+          : t("units.noValue")}
+      </Row>
     </>
   );
 }
@@ -140,18 +149,21 @@ function CommuteCellRows({ data, level, keyIndex, periodIdx, cells }) {
   const ratio = commuteCellRatio(data, level, keyIndex, periodIdx, usable);
   return (
     <>
-      <h4>Commuters · {data.commute.meta.periods[periodIdx].label}</h4>
+      <h4>{t("explorer.commutersHeading",
+        { label: data.commute.meta.periods[periodIdx].label })}</h4>
       <div style={{ marginBottom: 6 }}>
         {usable.map((cell) => {
           const value = cellValue(data, level, keyIndex, periodIdx, cell);
           return (
-            <Row key={cell} label={COMMUTE_CELLS[cell].label}>
-              {value === null ? "-" : fmt(value)}
+            <Row key={cell} label={t(COMMUTE_CELLS[cell].label)}>
+              {value === null ? t("units.noValue") : fmt(value)}
             </Row>
           );
         })}
         {Number.isFinite(ratio) ? (
-          <Row label="AC Transit ÷ all commuters">{`${(100 * ratio).toFixed(1)}%`}</Row>
+          <Row label={t("explorer.rowAcShare")}>
+            {t("numbers.percentFlat", { n: (100 * ratio).toFixed(1) })}
+          </Row>
         ) : null}
       </div>
     </>
@@ -173,7 +185,7 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
       <div style={{ marginBottom: 6 }}>
         <StatRows data={data} level={level} keyIndex={keyIndex} week={week} />
       </div>
-      <h4>Weekly ridership 2019-2026</h4>
+      <h4>{t("explorer.headingWeekly")}</h4>
       <SeriesChart series={series} meta={meta} />
       <CommuteCellRows
         data={data}
@@ -189,19 +201,23 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
         keyIndex={keyIndex}
         p={periodIdx}
       />
-      <h4>Recovery to Feb 2020</h4>
+      <h4>{t("explorer.headingRecovery")}</h4>
       {meta.recovery_thresholds.map((threshold, index) => {
         const month = recoveryTable[index];
         return (
           <div className="rec-row" key={threshold}>
-            <span className="k">{(threshold * 100).toFixed(0)}% of Feb 2020</span>
+            <span className="k">
+              {t("explorer.recoveryThreshold", { pct: (threshold * 100).toFixed(0) })}
+            </span>
             <span className={month < 0 ? "never" : undefined}>
-              {month === -2 ? "baseline too small" : month === -1 ? "not yet" : meta.months[month]}
+              {month === -2 ? t("explorer.recoveryTooSmall")
+                : month === -1 ? t("explorer.recoveryNotYet") : meta.months[month]}
             </span>
           </div>
         );
       })}
-      <h4>Routes ({eraForWeek(data, week) || "current"} signup)</h4>
+      <h4>{t("explorer.headingRoutes",
+        { era: eraForWeek(data, week) || t("explorer.eraCurrent") })}</h4>
       {routes.length ? (
         <div className="chips">
           {routes.map((route) => (
@@ -211,11 +227,12 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
           ))}
         </div>
       ) : (
-        <p className="hint">No route geometry in this era.</p>
+        <p className="hint">{t("explorer.noRouteGeometry")}</p>
       )}
       {level === "group" ? (
         <>
-          <h4>{members.length} stop{members.length === 1 ? "" : "s"} in group</h4>
+          <h4>{t(members.length === 1 ? "explorer.headingStopsOne" : "explorer.headingStopsMany",
+            { n: members.length })}</h4>
           <div className="stoplist">
             {members.map(([id, name]) => (
               <div key={`${id}-${name}`}>
@@ -280,37 +297,40 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
           type="button"
           onClick={() => onModeChange("own")}
         >
-          This route
+          {t("explorer.modeOwn")}
         </button>
         <button
           className={`segbtn${routeMode === "street" ? " on" : ""}`}
           type="button"
           onClick={() => onModeChange("street")}
         >
-          Streets it uses
+          {t("explorer.modeStreet")}
         </button>
       </div>
       <div style={{ marginBottom: 6 }}>
-        <Row label={`Boardings / wk, week of ${meta.weeks[week]}`}>
+        <Row label={t("explorer.rowBoardingsWeekOf", { week: meta.weeks[week] })}>
           <DisclosureValue real={series.real[week]} imp={series.imp[week]} />
         </Row>
-        <Row label="Imputed">
-          {current > 0 ? `${(100 * series.imp[week] / current).toFixed(1)}%` : "-"}
+        <Row label={t("explorer.rowImputed")}>
+          {current > 0
+            ? t("numbers.percentFlat", { n: (100 * series.imp[week] / current).toFixed(1) })
+            : t("units.noValue")}
         </Row>
-        <Row label="Share of street boardings">
-          {streetCurrent > 0 ? `${(100 * ownCurrent / streetCurrent).toFixed(0)}%` : "-"}
+        <Row label={t("explorer.rowShareOfStreet")}>
+          {streetCurrent > 0
+            ? t("numbers.percentFlat", { n: (100 * ownCurrent / streetCurrent).toFixed(0) })
+            : t("units.noValue")}
         </Row>
-        <Row label="Sections per rider">
+        <Row label={t("explorer.rowSectionsPerRider")}>
           {ownCurrent > 0 && !isScheduleOnly
             ? (ownLoadCurrent / ownCurrent).toFixed(1)
-            : "-"}
+            : t("units.noValue")}
         </Row>
       </div>
       <RouteServiceTable data={data} route={route} week={week} />
       <h4>
-        {routeMode === "own"
-          ? "Weekly boardings on this route, 2019-2026"
-          : "Weekly boardings on the lines using its streets, 2019-2026"}
+        {t(routeMode === "own"
+          ? "explorer.headingRouteWeeklyOwn" : "explorer.headingRouteWeeklyStreet")}
       </h4>
       <SeriesChart series={series} meta={meta} />
       <CommutePanel
@@ -322,15 +342,11 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
       />
       {isScheduleOnly ? (
         <p className="hint schedule-warning">
-          None of this line’s buses had a working passenger counter, so the figures above are estimated
-          from its schedule and from how riders used the stops of the lines it replaced. How full the bus is along the route is <b>not
-          reliable</b> here; the weekly boardings are the better guide.
+          <T id="explorer.scheduleWarning" c={[<b />]} />
         </p>
       ) : null}
       <p className="hint">
-        {routeMode === "own"
-          ? "Boardings per week on this route, each rider counted once per trip. The same rider changing buses counts again."
-          : "Boardings per week on every line that uses the same streets as this route, this route included. It shows how busy the streets are, not this line alone."}
+        {t(routeMode === "own" ? "explorer.hintRouteOwn" : "explorer.hintRouteStreet")}
       </p>
     </>
   );
@@ -344,28 +360,25 @@ function RouteServiceTable({ data, route, week }) {
   if (!service) return null;
   return (
     <>
-      <h4>Level of service · {snap.label}</h4>
+      <h4>{t("explorer.headingService", { label: snap.label })}</h4>
       <table className="service-table">
         <thead>
-          <tr><th /><th>Headway</th><th>Trips</th><th>Speed</th></tr>
+          <tr><th /><th>{t("explorer.colHeadway")}</th>
+            <th>{t("explorer.colTrips")}</th><th>{t("explorer.colSpeed")}</th></tr>
         </thead>
         <tbody>
           {snap.periods.map((period, index, snapPeriods) => (
             <tr key={period.id} title={periodHours(period, snapPeriods)}>
               <td className="k">{period.label}</td>
-              <td>{period.windows.length ? formatHeadway(service.headway[index]) : "-"}</td>
-              <td>{period.windows.length ? fmt(service.trips[index]) : "-"}</td>
-              <td>{period.windows.length ? formatMph(service.mph[index]) : "-"}</td>
+              <td>{period.windows.length
+                ? formatHeadway(service.headway[index]) : t("units.noValue")}</td>
+              <td>{period.windows.length ? fmt(service.trips[index]) : t("units.noValue")}</td>
+              <td>{period.windows.length ? formatMph(service.mph[index]) : t("units.noValue")}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="hint">
-        From the bus counters. Trips are the distinct scheduled starts seen that month, both
-        directions (weekend: Saturday and Sunday averaged); headway is the hours the line
-        runs in the period over its trips per direction. Speed includes dwell. Hover a row
-        for its hours.
-      </p>
+      <p className="hint">{t("explorer.hintService")}</p>
     </>
   );
 }
@@ -374,9 +387,12 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
   return (
     <aside id="detailPanel">
       <div className="cp-head">
-        <span id="dTitle">{detail.lv === "route" ? `Route ${detail.key}` : detail.label}</span>
-        <button className="btn small ghost" type="button" aria-label="Close details" onClick={onClose}>
-          X
+        <span id="dTitle">
+          {detail.lv === "route" ? t("explorer.routeTitle", { id: detail.key }) : detail.label}
+        </span>
+        <button className="btn small ghost" type="button"
+          aria-label={t("explorer.closeDetails")} onClick={onClose}>
+          {t("explorer.closeMark")}
         </button>
       </div>
       {detail.lv === "route" ? (
@@ -407,20 +423,22 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
 function ServiceLegend({ data, view, servicePeriod, week }) {
   const snap = displaySnapshot(data, week);
   const target = serviceSnapshot(data, week);
-  if (!snap) return <p className="hint">No counter snapshot covers this week's corridors.</p>;
+  if (!snap) return <p className="hint">{t("explorer.noSnapshot")}</p>;
   const period = snap.periods[servicePeriod];
   const snapPeriods = snap.periods;
   const los = view === "los";
   const breaks = los ? HEADWAY_BREAKS : SPEED_BREAKS;
   const colors = los ? HEADWAY_COLORS : SPEED_COLORS;
-  const unit = los ? "min" : "mph";
+  const unit = los ? t("units.minutesShort") : t("units.mphShort");
   return (
     <>
       {breaks.map((limit, index) => {
         const lower = index === 0 ? null : breaks[index - 1];
         const label = lower === null
-          ? `under ${limit} ${unit}`
-          : limit === Infinity ? `${lower}+ ${unit}` : `${lower}-${limit} ${unit}`;
+          ? t("explorer.legendUnder", { limit, unit })
+          : limit === Infinity
+            ? t("explorer.legendOver", { lower, unit })
+            : t("explorer.legendBetween", { lower, limit, unit });
         return (
           <div className="legend-swatch" key={limit}>
             <span style={{ background: colors[index] }} />
@@ -429,19 +447,22 @@ function ServiceLegend({ data, view, servicePeriod, week }) {
         );
       })}
       {los ? (
-        <div className="legend-swatch"><span style={{ background: NO_SERVICE }} /><span>no trips in this period</span></div>
+        <div className="legend-swatch"><span style={{ background: NO_SERVICE }} /><span>{t("explorer.legendNoTrips")}</span></div>
       ) : null}
       {target && snap !== target ? (
-        <p className="hint">Showing {snap.label} while {target.label} loads.</p>
+        <p className="hint">{t("explorer.hintShowingWhileLoading",
+          { shown: snap.label, target: target.label })}</p>
       ) : null}
       <p className="hint">
-        {period.label}, {snap.label}: {period.days === "weekend" ? "Sat & Sun" : "Mon-Fri"}{" "}
-        {periodHours(period, snapPeriods)}. The hours come from the {snap.era} GTFS schedule:
-        where its buses-in-service profile steps up and down.{" "}
-        {los
-          ? "Corridor headway counts every line on the street: the hours it runs over its trips per direction, averaged over the directions served."
-          : "Average speed between stop groups from door-open times, dwell included, weighted by trips."}{" "}
-        From the bus counters; width encodes onboard load.
+        {t("explorer.hintServiceWindow", {
+          period: period.label,
+          snapshot: snap.label,
+          days: t(period.days === "weekend" ? "explorer.daysWeekend" : "explorer.daysWeekday"),
+          hours: periodHours(period, snapPeriods),
+          era: snap.era,
+        })}
+        {t(los ? "explorer.hintHeadwayMethod" : "explorer.hintSpeedMethod")}
+        {t("explorer.hintFromCounters")}
       </p>
     </>
   );
@@ -463,10 +484,10 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     return <ServiceLegend data={data} view={view} servicePeriod={servicePeriod} week={week} />;
   }
   if (level !== "none" && !data.store[level]) {
-    return <p className="hint">Loading this level...</p>;
+    return <p className="hint">{t("explorer.loadingLevel")}</p>;
   }
   if (level === "none") {
-    return <p className="hint">Streets only. Wider, darker lines carry more riders; hover a street for the routes on it.</p>;
+    return <p className="hint">{t("explorer.legendStreetsOnly")}</p>;
   }
   if (view === "income") {
     const [lo, hi] = incomeDomain(data);
@@ -474,33 +495,39 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     return (
       <>
         {bar(SEQ_MAGENTA)}
-        {labels(`$${Math.round(lo / 1000)}k`, `$${Math.round(hi / 1000)}k+`)}
+        {labels(
+          t("explorer.legendIncomeLow", { lo: Math.round(lo / 1000) }),
+          t("explorer.legendIncomeHigh", { hi: Math.round(hi / 1000) }),
+        )}
         <p className="hint">
-          {income.measure}, ACS {income.year} 5-year ({income.table}). Fixed to the
-          tract range, so a colour means the same income at either level. Grey: not
-          published. Corridors keep showing onboard load.
+          {t("explorer.hintIncome", {
+            measure: income.measure, year: income.year, table: income.table })}
         </p>
-        <p className="hint">
-          One figure for the whole period: ACS does not track week to week, so the
-          time bar does not move it.
-        </p>
+        <p className="hint">{t("explorer.hintIncomeStatic")}</p>
       </>
     );
   }
   if (view === "commute") {
     if (!commute) {
-      return <p className="hint">Commute pack unavailable — run scripts/build_commute_pack.py.</p>;
+      return <p className="hint">{t("explorer.commuteUnavailable")}</p>;
     }
     if (commuteFocus) {
       return (
         <>
           {bar(SEQ_GREEN)}
-          {labels("no inferred flow", `${fmt(focusMax)} riders / wkday`)}
+          {labels(
+            t("explorer.legendNoFlow"),
+            t("explorer.legendRidersWkday", { n: fmt(focusMax) }),
+          )}
           <p className="hint">
-            Morning (5-9am) inferred riders {commuteFocusMode === "from" ? "leaving" : "arriving at"}{" "}
-            <b>{commuteFocus.label}</b>, {period.label} snapshot. Dot size and colour both scale with
-            the inferred flow; outlined dots are the selected {commuteFocus.kind === "region" ? "region" : "place"}.
-            Click another place to re-focus; X in the sidebar clears.
+            <T id="explorer.hintCommuteFocus" c={[<b />]} vars={{
+              direction: t(commuteFocusMode === "from"
+                ? "explorer.focusLeaving" : "explorer.focusArriving"),
+              label: commuteFocus.label,
+              period: period.label,
+              kind: t(commuteFocus.kind === "region"
+                ? "explorer.focusRegion" : "explorer.focusPlace"),
+            }} />
           </p>
         </>
       );
@@ -512,45 +539,44 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     if (missing.length) {
       return (
         <p className="hint">
-          {COMMUTE_CELLS[missing[0]].label} needs <code>lodes.json</code> at tract level,
-          which this bundle does not carry — run scripts/build_lodes_pack.py and sync
-          the pack.
+          <T id="explorer.hintLodesMissing" c={[<code />]}
+            vars={{ label: t(COMMUTE_CELLS[missing[0]].label) }} />
         </p>
       );
     }
     const year = lodesYear(data, data.commute.meta.periods.indexOf(period));
-    const names = orderCells(commuteCells).map((cell) => COMMUTE_CELLS[cell].label);
+    const names = orderCells(commuteCells).map((cell) => t(COMMUTE_CELLS[cell].label));
     const roundTrip = !!data.commute.rt;
     if (single) {
       const cell = commuteCells[0];
       return (
         <>
           {bar(SEQ_MAGENTA)}
-          {labels("0", `${fmt(cellDomain(data, level, data.commute.meta.periods.indexOf(period), cell))}+`)}
+          {labels("0", t("explorer.legendPlus", {
+            pct: fmt(cellDomain(data, level, data.commute.meta.periods.indexOf(period), cell)) }))}
           <p className="hint">
             {COMMUTE_CELLS[cell].src === "all"
-              ? `Employed residents living in each tract, Census LODES ${year}.`
-              : roundTrip
-                ? `Estimated AC Transit commuters living in each place on an average weekday: morning riders whose trip is repeated in reverse that evening. Grey: under ${COMMUTE_MIN} riders per weekday.`
-                : `Morning departures on an average weekday. Grey: under ${COMMUTE_MIN} riders per weekday.`}
+              ? t("explorer.hintLodesAll", { year })
+              : t(roundTrip ? "explorer.hintCommuteRoundTrip" : "explorer.hintCommuteDepartures",
+                { min: COMMUTE_MIN })}
           </p>
         </>
       );
     }
     const median = compareMedian(data, level, data.commute.meta.periods.indexOf(period));
-    const percent = (value) => `${(100 * value).toFixed(value < 0.01 ? 2 : 1)}%`;
+    const percent = (value) =>
+    t("numbers.percentFlat", { n: (100 * value).toFixed(value < 0.01 ? 2 : 1) });
     return (
       <>
         {bar(DIVERGING)}
         <div className="legend-labels">
-          <span>{percent(median / 4)} or less</span>
+          <span>{t("explorer.legendOrLess", { pct: percent(median / 4) })}</span>
           <span>{percent(median)}</span>
-          <span>{percent(median * 4)}+</span>
+          <span>{t("explorer.legendPlus", { pct: percent(median * 4) })}</span>
         </div>
         <p className="hint">
-          {names[0]} ÷ {names[1]} living in each tract (LODES {year}). White is the median tract,{" "}
-          {percent(median)}; red tracts have a higher share, blue a lower one. Grey: under {COMMUTE_MIN}{" "}
-          riders per weekday, or no workers to divide by.
+          {t("explorer.hintCompare", {
+            a: names[0], b: names[1], year, pct: percent(median), min: COMMUTE_MIN })}
         </p>
       </>
     );
@@ -559,8 +585,8 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     return (
       <>
         {bar(SEQ_BLUE)}
-        {labels("0", `${fmt(data.domains[level])}+ / wk`)}
-        <p className="hint">Boardings plus drop-offs per week. Larger circles mean more riders.</p>
+        {labels("0", t("explorer.legendPerWeek", { n: fmt(data.domains[level]) }))}
+        <p className="hint">{t("explorer.hintTotal")}</p>
       </>
     );
   }
@@ -568,8 +594,8 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     return (
       <>
         {bar(SEQ_GOLD)}
-        {labels("0%", "100% imputed")}
-        <p className="hint">Share of ridership from route-months failing the reliability gate.</p>
+        {labels("0%", t("explorer.legendImputedHigh"))}
+        <p className="hint">{t("explorer.hintImputed")}</p>
       </>
     );
   }
@@ -579,10 +605,11 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
       <>
         {bar(SEQ_BLUE)}
         {labels(meta.months[low], meta.months[meta.months.length - 1])}
-        <div className="legend-swatch"><span style={{ background: REC_NEVER }} /><span>never sustained by 2026-05</span></div>
-        <div className="legend-swatch"><span style={{ background: REC_SMALL }} /><span>baseline too small to assess</span></div>
+        <div className="legend-swatch"><span style={{ background: REC_NEVER }} /><span>{t("explorer.legendNeverSustained")}</span></div>
+        <div className="legend-swatch"><span style={{ background: REC_SMALL }} /><span>{t("explorer.legendBaselineTooSmall")}</span></div>
         <p className="hint">
-          First month holding {(meta.recovery_thresholds[recThresh] * 100).toFixed(0)}% of Feb 2020 for three straight months.
+          {t("explorer.hintRecovery",
+            { pct: (meta.recovery_thresholds[recThresh] * 100).toFixed(0) })}
         </p>
       </>
     );
@@ -591,7 +618,7 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     <>
       {bar(DIVERGING_RG)}
       {labels("0%", "200%")}
-      <p className="hint">Grey is approximately 100%: back to the week of {meta.baseline_label}. Red below baseline, green above.</p>
+      <p className="hint">{t("explorer.hintRelative", { week: meta.baseline_label })}</p>
     </>
   );
 }
@@ -620,10 +647,10 @@ function RouteSearch({ data, week, onPick }) {
         id="rsInput"
         type="search"
         value={query}
-        placeholder="Find a route..."
+        placeholder={t("explorer.searchPlaceholder")}
         autoComplete="off"
         spellCheck="false"
-        aria-label="Find a route"
+        aria-label={t("explorer.searchAria")}
         onChange={(event) => { setQuery(event.target.value); setCursor(-1); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}
@@ -676,22 +703,25 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
   return (
     <div id="chartPanel">
       <div className="cp-head">
-        <span id="cpTitle">{selection.keys.length} stop group{selection.keys.length === 1 ? "" : "s"} selected</span>
+        <span id="cpTitle">{t("explorer.selectionCount", {
+          n: selection.keys.length, s: selection.keys.length === 1 ? "" : "s" })}</span>
         <span className="cp-actions">
-          {tab === "riders" ? <button className="btn small" type="button" onClick={exportPng}>Export PNG</button> : null}
-          <button className="btn small ghost" type="button" aria-label="Close chart" onClick={onClear}>X</button>
+          {tab === "riders" ? <button className="btn small" type="button" onClick={exportPng}>
+            {t("explorer.exportPng")}</button> : null}
+          <button className="btn small ghost" type="button"
+            aria-label={t("explorer.closeChart")} onClick={onClear}>{t("explorer.closeMark")}</button>
         </span>
       </div>
       {data.speed && selection.bounds ? (
         <div className="seg">
-          {[["speed", "Riders and bus speed"], ["riders", "Observed vs. estimated"]].map(([value, label]) => (
+          {[["speed", "explorer.tabSpeed"], ["riders", "explorer.tabRiders"]].map(([value, label]) => (
             <button
               key={value}
               type="button"
               className={`segbtn${tab === value ? " on" : ""}`}
               onClick={() => setTab(value)}
             >
-              {label}
+              {t(label)}
             </button>
           ))}
         </div>
@@ -699,8 +729,10 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
       {tab === "speed" && selection.bounds ? (
         <>
           <p className="rs-stat">
-            Average bus speed, 2019–2026:{" "}
-            <b>{speed?.average ? `${speed.average.toFixed(1)} mph` : speed ? "no bus data here" : "loading…"}</b>
+            {t("explorer.speedStatLabel")}{" "}
+            <b>{speed?.average
+              ? t("units.mph", { n: speed.average.toFixed(1) })
+              : t(speed ? "explorer.speedNoData" : "explorer.speedLoading")}</b>
           </p>
           <RidershipSpeedChart
             series={series}
@@ -708,12 +740,7 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
             meta={data.meta}
             mapChanges={Object.values(data.speed.meta.eras).slice(1).map((era) => era.months[0])}
           />
-          <p className="hint rs-caption">
-            Each dot is a month: average bus speed on every street inside the box (from the bus counters, including
-            time at stops and lights) against average weekly boardings and drop-offs at the selected stops. Ringed
-            dots are the two months the street map was updated (January 2022, April 2025); part of any jump there
-            comes from that change, not from traffic.
-          </p>
+          <p className="hint rs-caption">{t("explorer.hintSpeedScatter")}</p>
         </>
       ) : (
         <SelectionChart series={series} meta={data.meta} canvasRef={canvasRef} />
@@ -724,12 +751,17 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
 
 function incomeRowHtml(data, level, keyIndex) {
   const income = incomeAt(data, level, keyIndex);
-  const label = level === "group" ? "Median income (block group)" : "Median income";
+  const label = t(level === "group"
+    ? "explorer.tipMedianIncomeBg" : "explorer.tipMedianIncome");
   if (!income) {
-    return `<div class="row"><span class="k">${label}</span><span>not published</span></div>`;
+    return `<div class="row"><span class="k">${escapeHtml(label)}</span>`
+      + `<span>${escapeHtml(t("explorer.tipNotPublished"))}</span></div>`;
   }
-  const value = income.topCoded ? "$250,000+" : `$${Math.round(income.med).toLocaleString()}`;
-  return `<div class="row"><span class="k">${label}</span><span>${value}</span></div>`;
+  const value = income.topCoded
+    ? t("explorer.tipIncomeTopCoded")
+    : `$${Math.round(income.med).toLocaleString()}`;
+  return `<div class="row"><span class="k">${escapeHtml(label)}</span>`
+    + `<span>${escapeHtml(value)}</span></div>`;
 }
 
 function statHtml(data, level, keyIndex, week) {
@@ -740,18 +772,26 @@ function statHtml(data, level, keyIndex, week) {
   const total = boardReal + boardImp + alightReal + alightImp;
   const imputed = boardImp + alightImp;
   const baseline = totalAt(data, level, keyIndex, data.BASE);
-  return `<div class="row"><span class="k">Boardings</span><span>${discloseHtml(boardReal, boardImp)}</span></div>
-    <div class="row"><span class="k">Drop-offs</span><span>${discloseHtml(alightReal, alightImp)}</span></div>
-    <div class="row"><span class="k">Ridership</span><span>${discloseHtml(boardReal + alightReal, imputed)}</span></div>
-    <div class="row"><span class="k">Imputed</span><span>${total > 0 ? `${(100 * imputed / total).toFixed(1)}%` : "-"}</span></div>
-    <div class="row"><span class="k">vs Feb 2020</span><span>${baseline > 0 ? `${(100 * total / baseline).toFixed(0)}%` : "-"}</span></div>
-    ${incomeRowHtml(data, level, keyIndex)}`;
+  const row = (key, value) =>
+    `<div class="row"><span class="k">${escapeHtml(t(key))}</span><span>${value}</span></div>`;
+  const pct = (value, digits) => (value === null
+    ? escapeHtml(t("units.noValue"))
+    : escapeHtml(t("numbers.percentFlat", { n: value.toFixed(digits) })));
+  return row("explorer.rowBoardings", discloseHtml(boardReal, boardImp))
+    + row("explorer.rowDropOffs", discloseHtml(alightReal, alightImp))
+    + row("explorer.rowRidership", discloseHtml(boardReal + alightReal, imputed))
+    + row("explorer.rowImputed", pct(total > 0 ? 100 * imputed / total : null, 1))
+    + row("explorer.rowVsBaseline", pct(baseline > 0 ? 100 * total / baseline : null, 0))
+    + incomeRowHtml(data, level, keyIndex);
 }
 
 function groupTipHtml(data, keyIndex, week) {
   const group = data.meta.stop_groups;
   return `<div style="font-size:12px"><b>${escapeHtml(group.name[keyIndex])}</b>
-    <span style="opacity:.65">${group.n_stops[keyIndex]} stop${group.n_stops[keyIndex] > 1 ? "s" : ""}</span>
+    <span style="opacity:.65">${escapeHtml(t(
+      group.n_stops[keyIndex] > 1 ? "explorer.tipStopsMany" : "explorer.tipStopsOne",
+      { n: group.n_stops[keyIndex] },
+    ))}</span>
     <div style="margin-top:4px">${statHtml(data, "group", keyIndex, week)}</div></div>`;
 }
 
@@ -1362,13 +1402,20 @@ function createRouteCanvasLayer(map, L, getCallbacks, mapWrapRef) {
 // So the net is reported as the group's, not as this corridor's load step.
 function nodeHoverHtml(flow) {
   const arrow = flow.net >= 0 ? "&#9650;" : "&#9660;";
-  return `<div style="font-size:12px"><div class="row"><span class="k">${flow.name}</span></div>
-    <div class="row"><span class="k">Boardings / wk</span><span>${discloseHtml(flow.board - flow.boardImp, flow.boardImp)}</span></div>
-    <div class="row"><span class="k">Drop-offs / wk</span><span>${discloseHtml(flow.alight - flow.alightImp, flow.alightImp)}</span></div>
-    <div class="row"><span class="k">Net at this stop group</span><span>${arrow} ${Math.abs(Math.round(flow.net)).toLocaleString()}</span></div></div>`;
+  const row = (key, value) =>
+    `<div class="row"><span class="k">${escapeHtml(t(key))}</span><span>${value}</span></div>`;
+  return `<div style="font-size:12px"><div class="row"><span class="k">${flow.name}</span></div>`
+    + row("explorer.rowBoardingsWk", discloseHtml(flow.board - flow.boardImp, flow.boardImp))
+    + row("explorer.rowDropOffsWk", discloseHtml(flow.alight - flow.alightImp, flow.alightImp))
+    + row("explorer.rowNetAtGroup",
+      `${arrow} ${Math.abs(Math.round(flow.net)).toLocaleString()}`)
+    + "</div>";
 }
 
 function corridorHoverHtml(data, era, index, load, imp, view, recThresh, servicePeriod, week) {
+  const extraRow = (key, value) =>
+    `<div class="row"><span class="k">${escapeHtml(t(key))}</span>`
+    + `<span>${escapeHtml(value)}</span></div>`;
   let extra = "";
   const snap = isServiceView(view) ? displaySnapshot(data, week) : null;
   const service = snap ? corridorService(data, snap, index) : null;
@@ -1378,7 +1425,7 @@ function corridorHoverHtml(data, era, index, load, imp, view, recThresh, service
     extra = snap.periods.map((period, p) => {
       const text = period.windows.length
         ? `${formatHeadway(service.headway[p])} · ${formatMph(service.mph[p])}`
-        : "no peak";
+        : t("explorer.tipNoPeak");
       return `<div class="row"><span class="k">${escapeHtml(period.label)}</span><span>${
         p === servicePeriod ? `<b>${text}</b>` : text
       }</span></div>`;
@@ -1388,13 +1435,17 @@ function corridorHoverHtml(data, era, index, load, imp, view, recThresh, service
   const baseline = stats.base[index];
   if (view === "rel") {
     extra = baseline > 0
-      ? `<div class="row"><span class="k">vs Feb 2020</span><span>${(100 * load / baseline).toFixed(0)}%</span></div>`
+      ? extraRow("explorer.rowVsBaseline",
+        t("numbers.percentFlat", { n: (100 * load / baseline).toFixed(0) }))
       : "";
   } else if (view === "imp" && load > 0) {
-    extra = `<div class="row"><span class="k">Imputed</span><span>${(100 * imp / load).toFixed(1)}%</span></div>`;
+    extra = extraRow("explorer.rowImputed",
+      t("numbers.percentFlat", { n: (100 * imp / load).toFixed(1) }));
   } else if (view === "recovery") {
     const month = stats.recovery[index * data.meta.recovery_thresholds.length + recThresh];
-    extra = `<div class="row"><span class="k">Recovered</span><span>${month === -2 ? "baseline too small" : month === -1 ? "not yet" : data.meta.months[month]}</span></div>`;
+    extra = extraRow("explorer.rowRecovered",
+      month === -2 ? t("explorer.recoveryTooSmall")
+        : month === -1 ? t("explorer.recoveryNotYet") : data.meta.months[month]);
   }
   // Name the lines that make up the corridor, not just its total. A corridor
   // is a union of route-directions sharing a street, so the number above is a
@@ -1407,12 +1458,14 @@ function corridorHoverHtml(data, era, index, load, imp, view, recThresh, service
   const shown = names.slice(0, ROUTE_LIST_MAX).map(escapeHtml).join(", ");
   const rest = names.length - ROUTE_LIST_MAX;
   const routeRow = names.length
-    ? `<div class="row"><span class="k">${names.length === 1 ? "Line" : `${names.length} lines`}</span>
-       <span>${shown}${rest > 0 ? ` +${rest} more` : ""}</span></div>`
+    ? `<div class="row"><span class="k">${escapeHtml(names.length === 1
+      ? t("explorer.tipLine") : t("explorer.tipLines", { n: names.length }))}</span>
+       <span>${shown}${rest > 0 ? escapeHtml(t("explorer.tipLinesMore", { n: rest })) : ""}</span></div>`
     : "";
-  return `<div style="font-size:12px">${routeRow}<div class="row"><span class="k">Onboard load / wk</span>
-    <span>${discloseHtml(load - imp, imp)}</span></div>${extra}
-    <div class="row hint-row"><span class="k">Click to pick a line</span></div></div>`;
+  return `<div style="font-size:12px">${routeRow}`
+    + `<div class="row"><span class="k">${escapeHtml(t("explorer.rowOnboardLoad"))}</span>`
+    + `<span>${discloseHtml(load - imp, imp)}</span></div>${extra}`
+    + `<div class="row hint-row"><span class="k">${escapeHtml(t("explorer.tipClickToPick"))}</span></div></div>`;
 }
 
 /* ------------------------------------------------------------- commute view */
@@ -1439,15 +1492,15 @@ function peakLabel(hour) {
 // Only the home end is offered: where bus commuters live against where all
 // employed residents live. The workplace cells were dropped from the app.
 const COMMUTE_CELLS = {
-  "ac-home": { label: "AC Transit commuters", col: "home", src: "ac" },
-  "all-home": { label: "All commuters", col: "home", src: "all" },
+  "ac-home": { label: "explorer.cellAcHome", col: "home", src: "ac" },
+  "all-home": { label: "explorer.cellAllHome", col: "home", src: "all" },
 };
 const COMMUTE_DEFAULT_CELLS = ["ac-home"];
 // The three buttons, each a set of cells: one measure alone, or both compared.
 const COMMUTE_MODES = [
-  ["ac", "AC Transit commuters", ["ac-home"]],
-  ["all", "All commuters", ["all-home"]],
-  ["compare", "Compare", ["ac-home", "all-home"]],
+  ["ac", "explorer.cellAcHome", ["ac-home"]],
+  ["all", "explorer.cellAllHome", ["all-home"]],
+  ["compare", "explorer.modeCompare", ["ac-home", "all-home"]],
 ];
 
 // LODES is published per tract and per year, so those two cells exist only at
@@ -1635,10 +1688,11 @@ function commuteTipHtml(data, level, keyIndex, name, p, cells) {
   const rows = cells.map((cell) => {
     const value = cellValue(data, level, keyIndex, p, cell);
     const label = COMMUTE_CELLS[cell].src === "all"
-      ? `${COMMUTE_CELLS[cell].label} (${lodesYear(data, p)})`
-      : COMMUTE_CELLS[cell].label;
+      ? t("explorer.tipLodesLabel",
+        { label: t(COMMUTE_CELLS[cell].label), year: lodesYear(data, p) })
+      : t(COMMUTE_CELLS[cell].label);
     return `<div class="row"><span class="k">${escapeHtml(label)}</span><span>${
-      value === null ? "-" : fmt(value)
+      value === null ? escapeHtml(t("units.noValue")) : fmt(value)
     }</span></div>`;
   }).join("");
   const ratio = commuteCellRatio(data, level, keyIndex, p, cells);
@@ -1646,10 +1700,12 @@ function commuteTipHtml(data, level, keyIndex, name, p, cells) {
   return `<div style="font-size:12px"><b>${escapeHtml(name)}</b>
     ${rows}
     ${Number.isFinite(ratio)
-      ? `<div class="row"><span class="k">AC Transit ÷ all commuters</span><span>${(100 * ratio).toFixed(1)}%</span></div>`
+      ? `<div class="row"><span class="k">${escapeHtml(t("explorer.rowAcShare"))}</span>`
+        + `<span>${escapeHtml(t("numbers.percentFlat", { n: (100 * ratio).toFixed(1) }))}</span></div>`
       : ""}
     ${stats
-      ? `<div class="row"><span class="k">All riders / weekday</span><span>${fmt(stats.total)}</span></div>`
+      ? `<div class="row"><span class="k">${escapeHtml(t("explorer.rowAllRiders"))}</span>`
+        + `<span>${fmt(stats.total)}</span></div>`
       : ""}
   </div>`;
 }
@@ -1662,28 +1718,37 @@ function CommutePanel({ data, commute, level, keyIndex, p }) {
   const base = commuteHourly(commute, level, keyIndex, commute.baseIdx);
   const period = commute.meta.periods[p];
   const growth = stats.baseTotal > 0 && p !== commute.baseIdx
-    ? `${(100 * stats.total / stats.baseTotal).toFixed(0)}%`
-    : "-";
+    ? t("numbers.percentFlat", { n: (100 * stats.total / stats.baseTotal).toFixed(0) })
+    : t("units.noValue");
   return (
     <>
-      <h4>Weekday profile · {period.label}</h4>
+      <h4>{t("explorer.headingWeekdayProfile", { label: period.label })}</h4>
       <HourlyChart now={now} base={base} windows={commute.meta.windows} />
       <p className="hint">
-        Boardings above the line, drop-offs below, average weekday. Grey outline: {commute.meta.base_label ?? "Feb 2020"}.
+        {t("explorer.hintWeekdayProfile",
+          { base: commute.meta.base_label ?? "Feb 2020" })}
       </p>
       <div style={{ marginBottom: 6 }}>
-        <Row label="Riders / weekday">{fmt(stats.total)}</Row>
-        <Row label="vs Feb 2020">{growth}</Row>
-        <Row label="AM balance">
-          {stats.amNet >= 0 ? "+" : ""}{(100 * stats.amNet).toFixed(0)}%{" "}
-          {stats.amNet >= 0 ? "arrive" : "depart"}
+        <Row label={t("explorer.rowRidersWeekday")}>{fmt(stats.total)}</Row>
+        <Row label={t("explorer.rowVsBaseline")}>{growth}</Row>
+        <Row label={t("explorer.rowAmBalance")}>
+          {t("explorer.balanceValue", {
+            sign: stats.amNet >= 0 ? "+" : "",
+            pct: (100 * stats.amNet).toFixed(0),
+            dir: t(stats.amNet >= 0 ? "explorer.amArrive" : "explorer.amDepart"),
+          })}
         </Row>
-        <Row label="PM balance">
-          {stats.pmNet >= 0 ? "+" : ""}{(100 * stats.pmNet).toFixed(0)}%{" "}
-          {stats.pmNet >= 0 ? "depart" : "arrive"}
+        <Row label={t("explorer.rowPmBalance")}>
+          {t("explorer.balanceValue", {
+            sign: stats.pmNet >= 0 ? "+" : "",
+            pct: (100 * stats.pmNet).toFixed(0),
+            dir: t(stats.pmNet >= 0 ? "explorer.amDepart" : "explorer.amArrive"),
+          })}
         </Row>
-        <Row label="Peak strength">
-          {Number.isFinite(stats.peakRatio) ? `${stats.peakRatio.toFixed(1)}×` : "-"}
+        <Row label={t("explorer.rowPeakStrength")}>
+          {Number.isFinite(stats.peakRatio)
+            ? t("explorer.peakRatio", { n: stats.peakRatio.toFixed(1) })
+            : t("units.noValue")}
         </Row>
       </div>
     </>
@@ -1734,13 +1799,13 @@ function renderMapLayers(api, data, options) {
 /* One plain paragraph per view, shown under the option while it is selected:
    what the colours and sizes are, where the numbers come from, nothing more. */
 const VIEW_DESCRIPTIONS = {
-  total: "How many times people got on or off an AC Transit bus at each place during the selected week. Larger, darker circles and areas mean more riders.",
-  rel: "Riders at each place in the selected week as a share of the week of Feb. 3, 2020. 100% means the same number of boardings and drop-offs as that week; green is above it and red below.",
-  recovery: "The first month in which each place's ridership held the chosen share of its February 2020 level for three months in a row. It does not change with the time bar.",
-  commute: "Where commuters live. AC Transit commuters is an estimate from the bus counters: a morning trip counts only when the same trip is made in reverse that evening. All commuters is the Census Bureau's count of employed residents. Compare divides the first by the second for each Census tract.",
-  speed: "The average speed of buses on each street, in miles per hour, from the times their doors opened at one stop and the next. It includes time spent at stops and traffic lights.",
-  los: "How often a bus comes on each street, counting every route that uses it: the average number of minutes between buses in one direction during the chosen time of day.",
-  imp: "The share of each place's count that is estimated rather than measured. Estimates fill in for buses without working passenger counters, and for new routes after the August 2025 service changes.",
+  total: "explorer.descTotal",
+  rel: "explorer.descRel",
+  recovery: "explorer.descRecovery",
+  commute: "explorer.descCommute",
+  speed: "explorer.descSpeed",
+  los: "explorer.descLos",
+  imp: "explorer.descImp",
 };
 
 const ABOUT_SEEN_KEY = "acpra-about-seen";
@@ -1760,29 +1825,15 @@ function AboutModal({ onClose }) {
         aria-labelledby="aboutTitle"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id="aboutTitle">About this data</h2>
-        <p>
-          These maps show AC Transit bus ridership from January 2019 to May 2026. The counts come from
-          automatic passenger counters: sensors at bus doors that record how many people get on and off at
-          each stop.
-        </p>
-        <p>
-          Not every bus had a working counter, especially before 2021. Where a route’s counters were missing
-          or unreliable for a month, its riders were estimated from AC Transit’s route totals, and all counts
-          were adjusted to match the ridership AC Transit reports to the federal National Transit Database.
-        </p>
-        <p>
-          Numbers on the map read as a total followed by the estimated part in gold: <b>1,200</b>{" "}
-          <span className="gold">(300)</span> means 1,200 riders, 300 of them estimated.
-        </p>
-        <p>
-          Trips between places, commute patterns, speeds and bus frequency are all calculated from these
-          counts. They are estimates, not records of individual trips.
-        </p>
+        <h2 id="aboutTitle">{t("explorer.aboutTitle")}</h2>
+        <p>{t("explorer.about1")}</p>
+        <p>{t("explorer.about2")}</p>
+        <p><T id="explorer.about3" c={[<b />, <span className="gold" />]} /></p>
+        <p>{t("explorer.about4")}</p>
         <div className="about-actions">
-          <a className="about-link" href="/story">Read the story →</a>
-          <a className="about-link" href="/methodology">Methodology →</a>
-          <button className="btn" type="button" onClick={onClose}>Explore the map</button>
+          <a className="about-link" href="/story">{t("explorer.aboutStory")}</a>
+          <a className="about-link" href="/methodology">{t("explorer.aboutMethodology")}</a>
+          <button className="btn" type="button" onClick={onClose}>{t("explorer.aboutExplore")}</button>
         </div>
       </div>
     </div>
@@ -2255,18 +2306,19 @@ export default function RidershipExplorer() {
     <>
       <div id="app">
         <aside id="sidebar">
-          <h1>AC Transit Ridership</h1>
-          <p className="sub">Weekly boardings and drop-offs, 2019–2026</p>
+          <h1>{t("explorer.title")}</h1>
+          <p className="sub">{t("explorer.subtitle")}</p>
 
           <section>
-            <h2>View</h2>
+            <h2>{t("explorer.headingView")}</h2>
             {[
-              ["total", "Total ridership"],
-              ["rel", "Relative to Feb 2020"],
-              ["recovery", "Recovery time"],
-              ...(data?.commute ? [["commute", "Commute pattern"]] : []),
-              ...(data?.service ? [["speed", "Speed per corridor"], ["los", "Level of service"]] : []),
-              ["imp", "Percent imputed"],
+              ["total", "explorer.viewTotal"],
+              ["rel", "explorer.viewRel"],
+              ["recovery", "explorer.viewRecovery"],
+              ...(data?.commute ? [["commute", "explorer.viewCommute"]] : []),
+              ...(data?.service
+                ? [["speed", "explorer.viewSpeed"], ["los", "explorer.viewLos"]] : []),
+              ["imp", "explorer.viewImp"],
             ].map(([value, label]) => (
               <div key={value}>
                 <label>
@@ -2280,21 +2332,21 @@ export default function RidershipExplorer() {
                       if (event.target.value !== "commute") setCommuteFocus(null);
                     }}
                   />
-                  {label}
+                  {t(label)}
                 </label>
-                {view === value ? <p className="view-desc">{VIEW_DESCRIPTIONS[value]}</p> : null}
+                {view === value ? <p className="view-desc">{t(VIEW_DESCRIPTIONS[value])}</p> : null}
               </div>
             ))}
             {view === "recovery" ? (
               <div id="recCtl">
                 <label className="inline">
-                  Reached
+                  {t("explorer.reachedLabel")}
                   <select value={recThresh} onChange={(event) => setRecThresh(Number(event.target.value))}>
                     {[
                       [0, "50%"], [1, "60%"], [2, "70%"], [3, "80%"], [4, "90%"], [5, "100%"],
                     ].map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
-                  of Feb 2020
+                  {t("explorer.ofBaseline")}
                 </label>
               </div>
             ) : null}
@@ -2313,7 +2365,7 @@ export default function RidershipExplorer() {
                     </button>
                   ))}
                 </div>
-                <p className="hint">Hover a street for every time of day, or open a route for its own table.</p>
+                <p className="hint">{t("explorer.hintServicePeriods")}</p>
               </div>
             ) : null}
             {view === "commute" && data?.commute ? (
@@ -2325,16 +2377,16 @@ export default function RidershipExplorer() {
                       <button
                         className="btn small ghost"
                         type="button"
-                        aria-label="Clear focus"
+                        aria-label={t("explorer.clearFocus")}
                         onClick={() => setCommuteFocus(null)}
                       >
-                        X
+                        {t("explorer.closeMark")}
                       </button>
                     </div>
                     <div className="seg">
                       {[
-                        ["to", "Inferred to here"],
-                        ["from", "Inferred from here"],
+                        ["to", "explorer.focusTo"],
+                        ["from", "explorer.focusFrom"],
                       ].map(([value, label]) => (
                         <button
                           key={value}
@@ -2342,14 +2394,13 @@ export default function RidershipExplorer() {
                           className={`segbtn${commuteFocusMode === value ? " on" : ""}`}
                           onClick={() => setCommuteFocusMode(value)}
                         >
-                          {label}
+                          {t(label)}
                         </button>
                       ))}
                     </div>
                     <p className="hint">
-                      {commuteFocus.lists
-                        ? "Green = stronger flow. Grey: nothing above the floor. Click another place to re-focus."
-                        : "Loading inferred flows..."}
+                      {t(commuteFocus.lists
+                        ? "explorer.hintFocusFlows" : "explorer.hintFocusLoading")}
                     </p>
                   </>
                 ) : (
@@ -2366,7 +2417,7 @@ export default function RidershipExplorer() {
                           aria-pressed={on}
                           onClick={() => setCommuteCells(cells)}
                         >
-                          {label}
+                          {t(label)}
                         </button>
                       );
                     })}
@@ -2375,27 +2426,28 @@ export default function RidershipExplorer() {
                 {!commuteFocus ? (
                   <p className="hint">
                     {commuteCells.length === 1
-                      ? `${COMMUTE_CELLS[commuteCells[0]].label} living in each place.`
-                      : "AC Transit commuters divided by all commuters living in each Census tract."}
-                    {data.lodes ? "" : " All commuters needs lodes.json, which this data bundle does not include."}
+                      ? t("explorer.hintCommuteSingle",
+                        { label: t(COMMUTE_CELLS[commuteCells[0]].label) })
+                      : t("explorer.hintCommuteCompare")}
+                    {data.lodes ? "" : t("explorer.hintLodesAbsent")}
                   </p>
                 ) : null}
                 <p className="hint">
-                  {data.commute.meta.periods[commutePeriodIdx].label}, average weekday. Click a place to
-                  see estimated morning trips to or from it.
+                  {t("explorer.hintCommutePeriod",
+                    { label: data.commute.meta.periods[commutePeriodIdx].label })}
                 </p>
               </div>
             ) : null}
           </section>
 
           <section>
-            <h2>Level</h2>
+            <h2>{t("explorer.headingLevel")}</h2>
             {[
-              ["group", "Stop groups"],
-              ["bgroup", "Block groups"],
-              ["tract", "Census tracts"],
-              ...(data?.cities ? [["city", "Cities"]] : []),
-              ["none", "Corridors"],
+              ["group", "explorer.levelGroup"],
+              ["bgroup", "explorer.levelBgroup"],
+              ["tract", "explorer.levelTract"],
+              ...(data?.cities ? [["city", "explorer.levelCity"]] : []),
+              ["none", "explorer.levelNone"],
             ].map(([value, label]) => (
               <label key={value} style={levelLocked(value) ? { opacity: 0.55 } : undefined}>
                 <input
@@ -2411,16 +2463,16 @@ export default function RidershipExplorer() {
                     setDetail((current) => current && current.lv !== "route" && current.lv !== nextLevel ? null : current);
                   }}
                 />
-                {label}
+                {t(label)}
               </label>
             ))}
             {commuteLocksTract ? (
-              <p className="hint">All commuters is published only for Census tracts.</p>
+              <p className="hint">{t("explorer.hintTractOnly")}</p>
             ) : null}
           </section>
 
           <section id="legendBox">
-            <h2>Legend</h2>
+            <h2>{t("explorer.headingLegend")}</h2>
             <Legend
               data={data}
               view={view}
@@ -2442,16 +2494,15 @@ export default function RidershipExplorer() {
           </section>
 
           <section>
-            <h2>Selection</h2>
-            <p className="hint">
-              Click a stop, an area or a street to see its numbers. To chart several places together, hold
-              Shift and drag a box across the map.
-            </p>
-            <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>Clear selection</button>
+            <h2>{t("explorer.headingSelection")}</h2>
+            <p className="hint">{t("explorer.hintSelection")}</p>
+            <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>
+              {t("explorer.clearSelection")}
+            </button>
           </section>
 
           <button className="btn about-btn" type="button" onClick={() => setAboutOpen(true)}>
-            About this data
+            {t("explorer.aboutTitle")}
           </button>
         </aside>
 
@@ -2459,7 +2510,7 @@ export default function RidershipExplorer() {
           <div id="map" ref={mapContainerRef} />
           {contextMenu ? (
             <div className="ctx-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-              <div className="ctx-head">Routes on this corridor</div>
+              <div className="ctx-head">{t("explorer.ctxRoutes")}</div>
               {contextMenu.routes.map((route) => (
                 <button className="ctx-item" type="button" key={route} onClick={() => openRouteDetail(route)}>
                   {route}
@@ -2470,13 +2521,16 @@ export default function RidershipExplorer() {
           {regionChooser ? (
             <div className="ctx-menu" id="regionChooser" style={{ left: regionChooser.x, top: regionChooser.y }}>
               <div className="ctx-head">
-                {regionChooser.keys.length} stop group{regionChooser.keys.length === 1 ? "" : "s"} selected
+                {t("explorer.selectionCount", {
+                  n: regionChooser.keys.length,
+                  s: regionChooser.keys.length === 1 ? "" : "s",
+                })}
               </div>
               <button className="ctx-item" type="button" onClick={() => chooseRegion("to")}>
-                Inferred to here (arrivals)
+                {t("explorer.ctxInferredTo")}
               </button>
               <button className="ctx-item" type="button" onClick={() => chooseRegion("from")}>
-                Inferred from here (departures)
+                {t("explorer.ctxInferredFrom")}
               </button>
               <button
                 className="ctx-item"
@@ -2487,7 +2541,7 @@ export default function RidershipExplorer() {
                   setRegionChooser(null);
                 }}
               >
-                Weekly chart
+                {t("explorer.ctxWeeklyChart")}
               </button>
             </div>
           ) : null}
@@ -2518,10 +2572,14 @@ export default function RidershipExplorer() {
         </main>
 
         <footer id="timebar">
-          <button className="btn" type="button" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying((current) => !current)}>
-            {playing ? "||" : ">"}
+          <button className="btn" type="button"
+            aria-label={t(playing ? "explorer.pauseLabel" : "explorer.playLabel")}
+            onClick={() => setPlaying((current) => !current)}>
+            {t(playing ? "explorer.pauseMark" : "explorer.playMark")}
           </button>
-          <div id="weekLabel">{data ? `Week of ${data.meta.weeks[week]}` : "-"}</div>
+          <div id="weekLabel">
+            {data ? t("explorer.weekOf", { week: data.meta.weeks[week] }) : t("units.noValue")}
+          </div>
           <input
             type="range"
             id="weekSlider"
@@ -2533,16 +2591,23 @@ export default function RidershipExplorer() {
             onChange={(event) => setWeek(Number(event.target.value))}
           />
           <div id="weekTotal">
-            {data ? <>System ridership <DisclosureValue real={systemTotal - systemImputed} imp={systemImputed} /></> : null}
+            {data ? (
+              <>
+                {t("explorer.systemRidership")}{" "}
+                <DisclosureValue real={systemTotal - systemImputed} imp={systemImputed} />
+              </>
+            ) : null}
           </div>
         </footer>
       </div>
       {aboutOpen ? <AboutModal onClose={closeAbout} /> : null}
-      {loading ? <div id="loading">Loading ridership data...</div> : null}
-      {!loading && loadingData ? <div className="loading-chip">Loading data for this view...</div> : null}
+      {loading ? <div id="loading">{t("explorer.loadingApp")}</div> : null}
+      {!loading && loadingData ? (
+        <div className="loading-chip">{t("explorer.loadingView")}</div>
+      ) : null}
       {error ? (
         <div className="error-state">
-          <div><strong>Unable to load the visualization</strong>{error.message}</div>
+          <div><strong>{t("explorer.errorTitle")}</strong>{error.message}</div>
         </div>
       ) : null}
     </>

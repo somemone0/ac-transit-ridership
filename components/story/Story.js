@@ -5,6 +5,7 @@ import { ensureData, everything, loadVisualizationData } from "../ridership-data
 import StoryMap from "./StoryMap";
 import { resolvePlaces } from "./prepare";
 import { BOUNDS, MAP_ONE, MAP_THREE, MAP_TWO, resolveScenes } from "./steps";
+import { T, t } from "../../lib/i18n";
 
 // Where in the viewport a passage has to reach before the map switches to it.
 const TRIGGER = 0.62;
@@ -63,6 +64,12 @@ function ScrollySection({ data, places, steps, label, first = "85vh" }) {
     const alpha = clamp01((viewport * 0.95 - rect.top) / (viewport * 0.2))
       * clamp01((rect.bottom - viewport * 0.04) / (viewport * 0.18));
     api.update(scenes[active], week, { rect, alpha });
+    // Keep the address bar pointed at whichever passage owns the map, so
+    // copying the URL at any point links straight back to that visual.
+    const activeId = steps[active].id;
+    if (activeId && window.location.hash.slice(1) !== activeId) {
+      window.history.replaceState(null, "", `#${activeId}`);
+    }
   }, [scenes, steps]);
 
   useEffect(() => {
@@ -95,11 +102,15 @@ function ScrollySection({ data, places, steps, label, first = "85vh" }) {
         {steps.map((step, index) => (
           <div
             className={`scrolly-step${step.scrub ? " scrub" : ""}`}
-            key={step.text[0]}
+            key={step.id}
             ref={(element) => { stepRefs.current[index] = element; }}
             style={index === 0 ? { paddingTop: first } : undefined}
           >
-            <div className="scrolly-card" ref={(element) => { cardRefs.current[index] = element; }}>
+            <div
+              className="scrolly-card"
+              id={step.id}
+              ref={(element) => { cardRefs.current[index] = element; }}
+            >
               {step.text.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
               {step.link ? (
                 <p className="scrolly-cta-wrap">
@@ -145,36 +156,45 @@ export default function Story() {
 
   const places = useMemo(() => (data ? resolvePlaces(data) : null), [data]);
 
+  // Land on whichever passage the URL names. Every step height is fixed in
+  // vh regardless of `data`, so the target's position is stable on first
+  // paint and this doesn't need to wait for the fetch above.
+  useEffect(() => {
+    const jumpToHash = () => {
+      const id = window.location.hash.slice(1);
+      if (!id) return;
+      const target = document.getElementById(id);
+      if (target) target.scrollIntoView({ block: "start" });
+    };
+    jumpToHash();
+    window.addEventListener("hashchange", jumpToHash);
+    return () => window.removeEventListener("hashchange", jumpToHash);
+  }, []);
+
   return (
     <article className="story">
       <header className="story-hero">
-        <p className="story-kicker">AC Transit, 2019–2026</p>
-        <h1>See how AC Transit ridership recovered from the pandemic</h1>
-        <p className="story-byline">John Schultz</p>
-        <p className="story-lede">
-          While AC Transit ridership has increased from the pandemic, the recovery has been uneven. Some places
-          have fully reached pre-pandemic levels of ridership while some have still yet to reach half of
-          pre-pandemic ridership.
-        </p>
+        <p className="story-kicker">{t("story.kicker")}</p>
+        <h1>{t("story.title")}</h1>
+        <p className="story-byline">{t("story.byline")}</p>
+        <p className="story-lede">{t("story.lede")}</p>
         {error ? (
-          <p className="story-error">The ridership data could not be loaded: {error.message}</p>
+          <p className="story-error">{t("story.error", { message: error.message })}</p>
         ) : null}
-        <p className="story-scroll-cue" aria-hidden="true">Scroll ↓</p>
+        <p className="story-scroll-cue" aria-hidden="true">{t("story.scrollCue")}</p>
       </header>
 
       <ScrollySection
         data={data}
         places={places}
         steps={MAP_ONE}
-        label="Map of AC Transit ridership in Berkeley and the East Bay compared with February 2020"
+        label={t("story.mapOneLabel")}
       />
 
       <div className="story-body">
-        <p>
-          To see this data, visit the <a href="/">interactive app</a>.
-        </p>
+        <p><T id="story.visitApp" c={[<a href="/" />]} /></p>
 
-        <h2>Where do people go on AC Transit?</h2>
+        <h2>{t("story.headingWhereDo")}</h2>
       </div>
 
       <ScrollySection
@@ -182,11 +202,11 @@ export default function Story() {
         places={places}
         steps={MAP_TWO}
         first="70vh"
-        label="Map of inferred morning bus trips to and from UC Berkeley"
+        label={t("story.mapTwoLabel")}
       />
 
       <div className="story-body">
-        <h2>Traffic</h2>
+        <h2>{t("story.headingTraffic")}</h2>
       </div>
 
       <ScrollySection
@@ -194,17 +214,13 @@ export default function Story() {
         places={places}
         steps={MAP_THREE}
         first="70vh"
-        label="Map of observed AC Transit bus speeds on Berkeley streets"
+        label={t("story.mapThreeLabel")}
       />
 
       <div className="story-body">
-        <p>
-          How every figure here is made — the counter correction, the weekly blend that carries it, and
-          where the result is known to be wrong — is set out on the <a href="/methodology">methodology
-          page</a>.
-        </p>
+        <p><T id="story.methodologyNote" c={[<a href="/methodology" />]} /></p>
         <p className="story-cta-wrap">
-          <a className="story-cta" href="/">See the data →</a>
+          <a className="story-cta" href="/">{t("story.seeData")}</a>
         </p>
       </div>
 

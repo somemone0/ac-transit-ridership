@@ -21,6 +21,7 @@
 
 import { useMemo } from "react";
 import katex from "katex";
+import { t } from "../../lib/i18n";
 
 const STOPS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th"];
 const OBSERVED = [120, 85, 160, 210, 95, 140, 60];
@@ -171,7 +172,7 @@ function Trips({ present, total = N_TRIPS, x, y, cols = 4, gap = 19, braced = tr
             y0={y - 8}
             y1={y + (lastPresentRow - 1) * gap + 8}
             depth={-6}
-            label="reported"
+            label={t("figure.braceReported")}
             color={COLORS.observed}
             opacity={present > 0 ? 1 : 0}
           />
@@ -180,7 +181,7 @@ function Trips({ present, total = N_TRIPS, x, y, cols = 4, gap = 19, braced = tr
             y0={y + lastPresentRow * gap - gap + 12}
             y1={y + (rows - 1) * gap + 8}
             depth={-6}
-            label="missing"
+            label={t("figure.braceMissing")}
             color={COLORS.dead}
             opacity={present < total ? 1 : 0}
           />
@@ -260,7 +261,7 @@ export default function RouteFigure({ state }) {
 
   return (
     <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${VB.h}`} role="img"
-      aria-label="A seven-stop bus route, its ridership corrected for the trips its counters missed">
+      aria-label={t("figure.routeAria")}>
       <g style={{ transform: `translateY(${baseline}px)`, transition: `transform ${MOVE}` }}>
         <Route values={values} segmentsAt={segmentsAt} />
       </g>
@@ -276,7 +277,7 @@ export default function RouteFigure({ state }) {
             labels={false}
             axis={[PAD.left - 10, xOf(3) + BAR_W + 10]}
           />
-          <text className="mth-fig-label" x={PAD.left - 10} y={20}>Route A</text>
+          <text className="mth-fig-label" x={PAD.left - 10} y={20}>{t("figure.routeA")}</text>
         </g>
         <g style={{ transform: `translateY(${PAD.top + 376}px)` }}>
           <Route
@@ -287,7 +288,7 @@ export default function RouteFigure({ state }) {
             labels={false}
             axis={[xOf(4) - 10, PAD.left + PLOT.w]}
           />
-          <text className="mth-fig-label" x={xOf(4) - 10} y={20}>Route B</text>
+          <text className="mth-fig-label" x={xOf(4) - 10} y={20}>{t("figure.routeB")}</text>
         </g>
       </g>
 
@@ -300,7 +301,7 @@ export default function RouteFigure({ state }) {
           y={126}
           opacity={sparse ? 0 : 1}
           color={COLORS.observed}
-          tex={String.raw`\tfrac{12}{20}\ \text{of the trips}`}
+          tex={t("figure.texOfTrips")}
         />
         <Tex
           x={PAD.left + PLOT.w + 44}
@@ -322,7 +323,7 @@ export default function RouteFigure({ state }) {
           opacity={sparse ? 1 : 0}
           color={COLORS.dead}
           size={16}
-          tex={String.raw`\tfrac{1}{20}\ \text{— too little to scale}`}
+          tex={t("figure.texTooLittle")}
         />
         <Tex
           x={PAD.left + PLOT.w + 44}
@@ -330,7 +331,7 @@ export default function RouteFigure({ state }) {
           opacity={donorPanel ? 1 : 0}
           color={COLORS.donor}
           size={16}
-          tex={String.raw`\text{borrow the shape}`}
+          tex={t("figure.texBorrowShape")}
         />
       </g>
     </svg>
@@ -376,7 +377,7 @@ function MixPanel() {
 
   return (
     <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${VB.h}`} role="img"
-      aria-label="One week's ridership as two bars, measured and from the schedule, each holding the same monthly route">
+      aria-label={t("figure.weekAria")}>
       <Tex
         x={40}
         y={34}
@@ -395,7 +396,7 @@ function MixPanel() {
         size={15}
         align="center"
         color="var(--mth-muted)"
-        tex={String.raw`\text{the same month in both bars: only the level it is held at differs}`}
+        tex={t("figure.texSameMonth")}
       />
 
       {/* both terms stand on one line, so their heights are comparable */}
@@ -413,7 +414,7 @@ function MixPanel() {
             style={{ fill: bar.color, stroke: bar.color, fillOpacity: 0.22 }}
           />
           <text className="mth-fig-num" x={bar.x + bar.w / 2} y={base - full * bar.share - 14}>
-            {`${Math.round(bar.share * 100)}% of the week`}
+            {t("figure.pctOfWeek", { pct: Math.round(bar.share * 100) })}
           </text>
           <text className="mth-fig-tick" x={bar.x + bar.w / 2} y={base + 26} style={{ fill: bar.color }}>
             {bar.title}
@@ -491,7 +492,7 @@ function WeekPanel({ state }) {
 
   return (
     <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${H}`} role="img"
-      aria-label="The month's ridership at every stop, and under it the same stops week by week, with the share the schedule carries in gold">
+      aria-label={t("figure.monthAria")}>
       <g style={{ transform: `translateY(${PAD.top - 40}px)` }}>
         <Tex
           x={LEFT - 40}
@@ -516,7 +517,7 @@ function WeekPanel({ state }) {
           align="center"
           color="var(--mth-muted)"
           opacity={blended ? 1 : 0}
-          tex={String.raw`\text{at } w = 0.3\text{, the gold in every week is the month above it}`}
+          tex={t("figure.texGoldIsMonth")}
         />
       </g>
 
@@ -556,7 +557,7 @@ function WeekPanel({ state }) {
             { key: "calibration", value: (value / C_ROUTE) * (C_PRA - 1), color: COLORS.calibration },
           ]}
         />
-        <text className="mth-fig-label" x={LEFT - 22} y={-4} textAnchor="end">the month</text>
+        <text className="mth-fig-label" x={LEFT - 22} y={-4} textAnchor="end">{t("figure.theMonth")}</text>
       </g>
 
       {/* and under it, the weeks */}
@@ -579,10 +580,12 @@ function WeekPanel({ state }) {
                 { key: "schedule", value: month(value) * fromSchedule, color: COLORS.schedule },
               ]}
             />
-            <text className="mth-fig-label" x={LEFT - 22} y={-4} textAnchor="end">{`week ${week + 1}`}</text>
+            <text className="mth-fig-label" x={LEFT - 22} y={-4} textAnchor="end">
+              {t("figure.weekN", { n: week + 1 })}</text>
             <Trips present={nodes} total={5} cols={5} gap={16} x={LEFT + PLOT_W + 32} y={-6} braced={false} />
             <text className="mth-fig-label" x={LEFT + PLOT_W + 122} y={-2}>
-              {`${Math.round((blended ? pFinal[week] : pWeek[week]) * 100)}% of the month`}
+              {t("figure.pctOfMonth",
+                { pct: Math.round((blended ? pFinal[week] : pWeek[week]) * 100) })}
             </text>
           </g>
         );

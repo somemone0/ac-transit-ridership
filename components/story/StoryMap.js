@@ -39,6 +39,8 @@ import {
   totalAt,
 } from "../ridership-data";
 import { mercator, prepareStory } from "./prepare";
+import { T, t } from "../../lib/i18n";
+import { strings } from "../../lib/strings";
 
 const CARTO_KEY = process.env.NEXT_PUBLIC_CARTO_KEY || "";
 // Dot sizing, fills and outlines follow the explorer's renderDataLayer so a
@@ -50,17 +52,17 @@ const MEMBER_EDGE = "#419c62";
 const FADE_MS = 220;
 const TRACE = "#9ec5f4";
 
-const AP_MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
-const FULL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const apM = (month) => t(`dates.monthsShort.${month - 1}`);
+const fullM = (month) => t(`dates.monthsFull.${month - 1}`);
 
 export function apDate(label) {
   const [year, month, day] = label.split("-").map(Number);
-  return `${AP_MONTHS[month - 1]} ${day}, ${year}`;
+  return t("dates.monthDayYear", { month: apM(month), day, year });
 }
 
 function apMonth(label) {
   const [year, month] = label.split("-").map(Number);
-  return `${AP_MONTHS[month - 1]} ${year}`;
+  return t("dates.monthYear", { month: apM(month), year });
 }
 
 function cssVar(name, fallback) {
@@ -744,10 +746,10 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
       let figure = "";
       if (place.routes) {
         const share = routesYearShare(data, place.routes);
-        if (Number.isFinite(share)) figure = `${Math.round(share * 100)}% of pre-pandemic riders`;
+        if (Number.isFinite(share)) figure = t("storyMap.calloutPrePandemic", { pct: Math.round(share * 100) });
       } else {
         const share = relativeFor(data, place.level, place.keys, week);
-        if (Number.isFinite(share)) figure = `${Math.round(share * 100)}% of Feb. 2020`;
+        if (Number.isFinite(share)) figure = t("storyMap.calloutOfBaseline", { pct: Math.round(share * 100) });
       }
       label(x, y, figure ? [place.label, figure] : [place.label], start && start[0] > x);
       parts.push("</g>");
@@ -762,24 +764,32 @@ function createEngine({ map, container, canvas, svg, tip, getData, layout, onHud
     if (kind === "dot") {
       const name = meta.stop_groups.name[hit.key];
       if (scene.view === "commute") {
-        return `<b>${escapeHtml(name)}</b><div>${hit.member
-          ? "UC Berkeley stop group"
-          : `${fmt(hit.value)} inferred riders / weekday`}</div>`;
+        return `<b>${escapeHtml(name)}</b><div>${escapeHtml(hit.member
+          ? t("storyMap.tipCommuteMember")
+          : t("storyMap.tipInferredRiders", { n: fmt(hit.value) }))}</div>`;
       }
       const share = relativeFor(data, "group", [hit.key], week);
-      return `<b>${escapeHtml(name)}</b><div>${fmt(hit.value)} riders this week</div>
-        <div>${Number.isFinite(share) ? `${Math.round(share * 100)}% of Feb. 2020` : "No Feb. 2020 service"}</div>`;
+      return `<b>${escapeHtml(name)}</b>
+        <div>${escapeHtml(t("storyMap.tipRidersThisWeek", { n: fmt(hit.value) }))}</div>
+        <div>${escapeHtml(Number.isFinite(share)
+          ? t("storyMap.calloutOfBaseline", { pct: Math.round(share * 100) })
+          : t("storyMap.tipNoBaseline"))}</div>`;
     }
     if (scene.view === "recovery") {
       const month = recoveryAt(data, "bgroup", hit.key, scene.recThresh);
-      const text = month === -2 ? "Too little Feb. 2020 service to judge"
-        : month === -1 ? "Not yet back to Feb. 2020" : `Back to Feb. 2020 in ${apMonth(meta.months[month])}`;
-      return `<b>Block group ${escapeHtml(meta.bgroups[hit.key])}</b><div>${text}</div>`;
+      const text = month === -2 ? t("storyMap.tipTooLittle")
+        : month === -1 ? t("storyMap.tipNotYet")
+          : t("storyMap.tipRecoveredIn", { month: apMonth(meta.months[month]) });
+      return `<b>${escapeHtml(t("storyMap.tipBlockGroup", { id: meta.bgroups[hit.key] }))}</b>`
+        + `<div>${escapeHtml(text)}</div>`;
     }
     const share = relativeFor(data, "bgroup", [hit.key], week);
-    return `<b>Block group ${escapeHtml(meta.bgroups[hit.key])}</b>
-      <div>${fmt(totalAt(data, "bgroup", hit.key, week))} riders this week</div>
-      <div>${Number.isFinite(share) ? `${Math.round(share * 100)}% of Feb. 2020` : "No Feb. 2020 service"}</div>`;
+    return `<b>${escapeHtml(t("storyMap.tipBlockGroup", { id: meta.bgroups[hit.key] }))}</b>
+      <div>${escapeHtml(t("storyMap.tipRidersThisWeek",
+        { n: fmt(totalAt(data, "bgroup", hit.key, week)) }))}</div>
+      <div>${escapeHtml(Number.isFinite(share)
+        ? t("storyMap.calloutOfBaseline", { pct: Math.round(share * 100) })
+        : t("storyMap.tipNoBaseline"))}</div>`;
   };
 
   const onMove = (event) => {
@@ -987,13 +997,17 @@ function Hud({ data, scene, week }) {
     const [year, month] = (period?.id || "2026-02").split("-").map(Number);
     return (
       <>
-        <div className="story-hud-kicker">Inferred morning trips</div>
-        <div className="story-hud-title">{FULL_MONTHS[month - 1]} {year}</div>
+        <div className="story-hud-kicker">{t("storyMap.commuteKicker")}</div>
+        <div className="story-hud-title">{t("storyMap.commuteTitle", { month: fullM(month), year })}</div>
         <p className="story-hud-note">
-          Average weekday, 5–9 a.m., {scene.focus?.mode === "from" ? "leaving" : "arriving at"} UC Berkeley.
+          {t("storyMap.commuteNote", {
+            direction: t(scene.focus?.mode === "from"
+              ? "storyMap.commuteLeaving" : "storyMap.commuteArriving"),
+          })}
         </p>
-        <Ramp colors={SEQ_GREEN.slice(1)} labels={["Fewer", "More inferred riders"]} />
-        <div className="story-swatch"><span className="member" />UC Berkeley stop groups</div>
+        <Ramp colors={SEQ_GREEN.slice(1)}
+          labels={[t("storyMap.commuteRampLow"), t("storyMap.commuteRampHigh")]} />
+        <div className="story-swatch"><span className="member" />{t("storyMap.commuteMember")}</div>
       </>
     );
   }
@@ -1002,14 +1016,12 @@ function Hud({ data, scene, week }) {
     const threshold = Math.round(meta.recovery_thresholds[scene.recThresh] * 100);
     return (
       <>
-        <div className="story-hud-kicker">Recovery time</div>
-        <div className="story-hud-title">First month back to {threshold}%</div>
-        <p className="story-hud-note">
-          When each block group first held {threshold}% of its Feb. 2020 ridership for three straight months.
-        </p>
+        <div className="story-hud-kicker">{t("storyMap.recoveryKicker")}</div>
+        <div className="story-hud-title">{t("storyMap.recoveryTitle", { pct: threshold })}</div>
+        <p className="story-hud-note">{t("storyMap.recoveryNote", { pct: threshold })}</p>
         <Ramp colors={SEQ_BLUE} labels={[apMonth(meta.months[low]), apMonth(meta.months[meta.months.length - 1])]} />
-        <div className="story-swatch"><span style={{ background: REC_NEVER }} />Not yet</div>
-        <div className="story-swatch"><span style={{ background: REC_SMALL }} />Too little 2020 service to judge</div>
+        <div className="story-swatch"><span style={{ background: REC_NEVER }} />{t("storyMap.recoveryNever")}</div>
+        <div className="story-swatch"><span style={{ background: REC_SMALL }} />{t("storyMap.recoverySmall")}</div>
       </>
     );
   }
@@ -1017,10 +1029,10 @@ function Hud({ data, scene, week }) {
   if (scene.series === "speed") {
     const speeds = berkeleySpeedSeries(data, prep, scene.period || "day");
     const ridership = prep.series.berkeley;
-    const mph = (value) => (Number.isFinite(value) ? value.toFixed(1) : "–");
+    const mph = (value) => (Number.isFinite(value) ? value.toFixed(1) : t("numbers.missing"));
     return (
       <>
-        <div className="story-hud-kicker">Week of</div>
+        <div className="story-hud-kicker">{t("storyMap.weekOf")}</div>
         <div className="story-hud-title">{apDate(meta.weeks[week])}</div>
         <Sparkline
           series={speeds.p50}
@@ -1031,16 +1043,17 @@ function Hud({ data, scene, week }) {
           reference={null}
         />
         <p className="story-hud-note">
-          Berkeley bus speed: <b>{mph(speeds.p50[week])} mph</b> in the middle
+          <T id="storyMap.speedNote" c={[<b />]} vars={{ mph: mph(speeds.p50[week]) }} />
           {Number.isFinite(ridership[week])
-            ? <> · ridership <b>{Math.round(ridership[week] * 100)}%</b> of Feb. 2020</>
+            ? <T id="storyMap.speedRidership" c={[<b />]}
+                vars={{ pct: Math.round(ridership[week] * 100) }} />
             : null}
         </p>
         <p className="story-hud-note subtle">
-          Slowest tenth of bus-km under <b>{mph(speeds.p10[week])}</b>, fastest tenth over{" "}
-          <b>{mph(speeds.p90[week])}</b> mph.
+          <T id="storyMap.speedSpread" c={[<b />, <b />]}
+            vars={{ low: mph(speeds.p10[week]), high: mph(speeds.p90[week]) }} />
         </p>
-        <Ramp colors={SPEED_COLORS} labels={["6 mph", "12 mph", "20 mph"]} />
+        <Ramp colors={SPEED_COLORS} labels={strings.storyMap.speedRamp} />
       </>
     );
   }
@@ -1048,14 +1061,18 @@ function Hud({ data, scene, week }) {
   const share = series[week];
   return (
     <>
-      <div className="story-hud-kicker">Week of</div>
+      <div className="story-hud-kicker">{t("storyMap.weekOf")}</div>
       <div className="story-hud-title">{apDate(meta.weeks[week])}</div>
       <Sparkline series={series} week={week} meta={meta} />
       <p className="story-hud-note">
-        {scene.series === "system" ? "Systemwide" : "Berkeley"} ridership:{" "}
-        <b>{Number.isFinite(share) ? `${Math.round(share * 100)}%` : "–"}</b> of Feb. 2020
+        <T id="storyMap.ridershipNote" c={[<b />]} vars={{
+          scope: t(scene.series === "system" ? "storyMap.seriesSystem" : "storyMap.seriesBerkeley"),
+          pct: Number.isFinite(share)
+            ? t("numbers.percentFlat", { n: Math.round(share * 100) })
+            : t("numbers.missing"),
+        }} />
       </p>
-      <Ramp colors={DIVERGING_RG} labels={["0%", "100%", "200%"]} />
+      <Ramp colors={DIVERGING_RG} labels={strings.storyMap.ridershipRamp} />
       {scene.level === "group" ? <DotScale data={data} /> : null}
       <CityComparison data={data} week={week} basis={scene.compare} />
     </>
@@ -1081,7 +1098,7 @@ function DotScale({ data }) {
   });
   return (
     <div className="story-dotscale">
-      <svg width={x} height={height + 14} role="img" aria-label="Dot size scale">
+      <svg width={x} height={height + 14} role="img" aria-label={t("storyMap.dotScaleAria")}>
         {dots.map((dot) => (
           <g key={dot.value}>
             <circle cx={dot.cx + 1} cy={height - dot.r - 1} r={dot.r} className="dot" />
@@ -1089,7 +1106,7 @@ function DotScale({ data }) {
           </g>
         ))}
       </svg>
-      <span className="story-dotscale-unit">riders per week</span>
+      <span className="story-dotscale-unit">{t("storyMap.dotScaleUnit")}</span>
     </div>
   );
 }
@@ -1114,8 +1131,11 @@ function CityComparison({ data, week, basis }) {
     <div className="story-cities">
       <div className="story-cities-title">
         {year
-          ? `By city: ${apMonth(data.meta.weeks[data.W - 52])}–${apMonth(data.meta.weeks[data.W - 1])} vs. the year before the pandemic`
-          : "By city: four weeks from this date vs. February 2020"}
+          ? t("storyMap.citiesTitleYear", {
+            from: apMonth(data.meta.weeks[data.W - 52]),
+            to: apMonth(data.meta.weeks[data.W - 1]),
+          })
+          : t("storyMap.citiesTitleWeek")}
       </div>
       {rows.map((row) => (
         <div className={`story-city${row.name === "Berkeley" ? " focus" : ""}`} key={row.name}>
@@ -1235,7 +1255,7 @@ export default function StoryMap({ data, initialBounds, apiRef, onReady, layout 
           <Hud data={data} scene={hud.scene} week={hud.week} />
         </div>
       ) : null}
-      {!data ? <div className="story-map-loading">Loading ridership data…</div> : null}
+      {!data ? <div className="story-map-loading">{t("storyMap.loading")}</div> : null}
     </div>
   );
 }

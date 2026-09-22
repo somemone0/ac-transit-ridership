@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SEQ_BLUE } from "./ridership-data";
+import { T, t } from "../lib/i18n";
 
 const MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
 
@@ -74,8 +75,8 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
       .filter((p) => Number.isFinite(p.mph));
   }, [series, speed, meta]);
 
-  if (!speed) return <p className="hint">Loading bus speeds…</p>;
-  if (points.length < 2) return <p className="hint">No bus speed data inside this box.</p>;
+  if (!speed) return <p className="hint">{t("speedChart.loading")}</p>;
+  if (points.length < 2) return <p className="hint">{t("speedChart.empty")}</p>;
 
   const size = 440;
   const pad = { left: 52, right: 16, top: 14, bottom: 40 };
@@ -116,7 +117,7 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
   return (
     <div className="rs-chart square">
       <div className="rs-legend" aria-hidden="true">
-        <span><i className="rs-key solid" />Each dot is a month, joined in time order</span>
+        <span><i className="rs-key solid" />{t("speedChart.legend")}</span>
         <span className="rs-time">
           {points[0].month.slice(0, 4)}
           <i className="rs-time-ramp" style={{ background: `linear-gradient(90deg, ${ramp.join(",")})` }} />
@@ -129,7 +130,7 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
           viewBox={`0 0 ${size} ${size}`}
           className="rs-svg"
           role="img"
-          aria-label="Monthly average bus speed against riders per week for the selected area, joined in time order"
+          aria-label={t("speedChart.ariaLabel")}
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
         >
@@ -146,7 +147,7 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
             </g>
           ))}
           <text x={pad.left + inner.w / 2} y={size - 6} textAnchor="middle" className="rs-title">
-            Average bus speed, mph
+            {t("speedChart.axisSpeed")}
           </text>
           <text
             x={12}
@@ -155,7 +156,7 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
             className="rs-title"
             transform={`rotate(-90 12 ${pad.top + inner.h / 2})`}
           >
-            Riders per week
+            {t("speedChart.axisRiders")}
           </text>
 
           {points.slice(1).map((p, i) => (
@@ -205,9 +206,10 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
             }}
           >
             <div className="rs-tooltip-title">{monthLabel(active.month)}</div>
-            <div><b>{active.mph.toFixed(1)} mph</b> average bus speed</div>
-            <div><b>{Math.round(active.riders).toLocaleString("en-US")}</b> riders a week</div>
-            {changes.has(active.month) ? <div className="rs-tooltip-title">Street map updated this month</div> : null}
+            <div><T id="speedChart.tooltipSpeed" c={[<b />]} vars={{ mph: active.mph.toFixed(1) }} /></div>
+            <div><T id="speedChart.tooltipRiders" c={[<b />]}
+              vars={{ riders: Math.round(active.riders).toLocaleString("en-US") }} /></div>
+            {changes.has(active.month) ? <div className="rs-tooltip-title">{t("speedChart.tooltipStreetChange")}</div> : null}
           </div>
         ) : null}
       </div>
