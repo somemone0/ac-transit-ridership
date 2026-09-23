@@ -1052,12 +1052,6 @@ label.inline select {
   color: var(--text-muted);
 }
 
-.rs-mapchange {
-  stroke: var(--text-muted);
-  stroke-dasharray: 3 3;
-  stroke-width: 1;
-}
-
 /* Connected scatterplot: speed across, riders up, months joined in order. */
 .rs-chart.square {
   width: 460px;
@@ -1071,11 +1065,6 @@ label.inline select {
 .rs-point {
   stroke: var(--surface-1);
   stroke-width: 2;
-}
-
-.rs-point.mapchange {
-  stroke: var(--text-primary);
-  stroke-width: 1.5;
 }
 
 .rs-label {

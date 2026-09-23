@@ -38,7 +38,7 @@ const TIME_RAMP = SEQ_BLUE.slice(0, 5).reverse();
    how the two moved together. Colour runs from the plane's end of the ramp to
    the far end through time (see TIME_RAMP), and the first month, April 2020
    and the latest month are labelled. */
-export default function RidershipSpeedChart({ series, speed, meta, mapChanges = [] }) {
+export default function RidershipSpeedChart({ series, speed, meta }) {
   const [hover, setHover] = useState(null);
   const svgRef = useRef(null);
   const ramp = TIME_RAMP;
@@ -78,7 +78,6 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
     [points.findIndex((p) => p.month === "2020-04"), "April 2020"],
     [last, monthLabel(points[last].month)],
   ].filter(([index]) => index > 0 || index === 0);
-  const changes = new Set(mapChanges);
 
   const onMove = (event) => {
     const box = svgRef.current.getBoundingClientRect();
@@ -160,7 +159,7 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
               cx={x(p.mph)}
               cy={y(p.riders)}
               r={hover === index ? 5.5 : 4}
-              className={`rs-point${changes.has(p.month) ? " mapchange" : ""}`}
+              className="rs-point"
               style={{ fill: timeColor(index / last) }}
             />
           ))}
@@ -193,7 +192,6 @@ export default function RidershipSpeedChart({ series, speed, meta, mapChanges = 
             <div><T id="speedChart.tooltipSpeed" c={[<b />]} vars={{ mph: active.mph.toFixed(1) }} /></div>
             <div><T id="speedChart.tooltipRiders" c={[<b />]}
               vars={{ riders: Math.round(active.riders).toLocaleString("en-US") }} /></div>
-            {changes.has(active.month) ? <div className="rs-tooltip-title">{t("speedChart.tooltipStreetChange")}</div> : null}
           </div>
         ) : null}
       </div>

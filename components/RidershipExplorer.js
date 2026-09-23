@@ -251,8 +251,7 @@ function AreaDetail({ data, detail, week, onRouteClick, commute, periodIdx, comm
       ) : (
         <RidershipOverTime data={data} series={series} recoveryTable={recoveryTable} />
       )}
-      <h4>{t("explorer.headingRoutes",
-        { era: eraForWeek(data, week) || t("explorer.eraCurrent") })}</h4>
+      <h4>{t("explorer.headingRoutes")}</h4>
       {routes.length ? (
         <div className="chips">
           {routes.map((route) => (
@@ -494,7 +493,6 @@ function ServiceLegend({ data, view, servicePeriod, week }) {
           snapshot: snap.label,
           days: t(period.days === "weekend" ? "explorer.daysWeekend" : "explorer.daysWeekday"),
           hours: periodHours(period, snapPeriods),
-          era: snap.era,
         })}
         {t(los ? "explorer.hintHeadwayMethod" : "explorer.hintSpeedMethod")}
         {t("explorer.hintFromCounters")}
@@ -706,7 +704,7 @@ function RouteSearch({ data, week, onPick }) {
       {open && hits.length ? (
         <ul id="rsList">
           {hits.map((route, index) => {
-            const sectionCount = ((data.routeSections[route] || {})[era] || []).length;
+            const running = ((data.routeSections[route] || {})[era] || []).length > 0;
             return (
               <li
                 className={index === cursor ? "on" : undefined}
@@ -714,7 +712,7 @@ function RouteSearch({ data, week, onPick }) {
                 onMouseDown={(event) => { event.preventDefault(); pick(route); }}
               >
                 <span>{route}</span>
-                <span className="sub">{sectionCount ? `${sectionCount} sections` : `not in ${era}`}</span>
+                {running ? null : <span className="sub">{t("explorer.searchNotRunning")}</span>}
               </li>
             );
           })}
@@ -773,7 +771,6 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
             series={series}
             speed={speed}
             meta={data.meta}
-            mapChanges={Object.values(data.speed.meta.eras).slice(1).map((era) => era.months[0])}
           />
           <p className="hint rs-caption">{t("explorer.hintSpeedScatter")}</p>
         </>
