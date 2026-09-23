@@ -229,7 +229,6 @@ export default function Story() {
       />
 
       <div className="story-body">
-        <p><T id="story.methodologyNote" c={[<a href="/methodology" />]} /></p>
         <p className="story-cta-wrap">
           <a className="story-cta" href="/">{t("story.seeData")}</a>
         </p>

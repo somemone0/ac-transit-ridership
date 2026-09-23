@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
 
-import RouteFigure, { C_PRA, C_ROUTE, N_PRESENT, N_TRIPS, W_IMPUTED } from "./figure";
+import RouteFigure from "./figure";
 import HISTOGRAM from "./w-histogram.json";
 import { T, t } from "../../lib/i18n";
 
@@ -71,11 +71,6 @@ const STEPS = [
             <M>{String.raw`\textcolor{#83C167}{c_{route}} = N_{present}/N_{total}`}</M>,
           ]} />
         </p>
-        <p className="mth-aside">
-          <T id="methodology.step.coverageAside"
-            c={[<M>{String.raw`\textcolor{#83C167}{c_{route}}`}</M>]}
-            vars={{ present: N_PRESENT, total: N_TRIPS, c: C_ROUTE }} />
-        </p>
       </>
     ),
   },
@@ -101,20 +96,12 @@ const STEPS = [
     ),
   },
   {
-    state: "sparse",
+    state: "donors",
     body: <p>{t("methodology.step.sparse")}</p>,
   },
   {
-    state: "donors",
-    body: <p>{t("methodology.step.donors")}</p>,
-  },
-  {
     state: "donorFill",
-    body: (
-      <p className="mth-aside">
-        <T id="methodology.step.donorFill" c={[<C c="donor" />]} />
-      </p>
-    ),
+    body: <p>{t("methodology.step.donors")}</p>,
   },
   {
     state: "weeks",
@@ -139,18 +126,7 @@ const STEPS = [
   },
   {
     state: "mix",
-    body: (
-      <>
-        <p><T id="methodology.step.mix" c={[<M>w</M>, <M>w</M>, <M>w</M>]} /></p>
-        <p className="mth-aside">
-          <T id="methodology.step.mixAside" c={[
-            <M>{String.raw`w = ${W_IMPUTED}`}</M>,
-            <C c="imputed" />,
-            <C c="real" />,
-          ]} />
-        </p>
-      </>
-    ),
+    body: <p><T id="methodology.step.mix" c={[<M>w</M>, <M>w</M>, <M>w</M>]} /></p>,
   },
   { state: "blend", body: <p>{t("methodology.step.blend")}</p> },
 ];
@@ -255,7 +231,6 @@ export default function Methodology() {
         <p>{t("methodology.intro1")}</p>
         <p><T id="methodology.intro2" c={[<em />]} /></p>
         <p>{t("methodology.intro3")}</p>
-        <p className="mth-turn">{t("methodology.introTurn")}</p>
       </div>
 
       <section className="mth-scrolly" ref={sectionRef}>

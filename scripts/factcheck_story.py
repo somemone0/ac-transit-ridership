@@ -69,8 +69,8 @@ def inside(poly, lat, lon):
 
 def year_share(imputed, boardings, keys, year, weeks):
     idx = [i for i, w in enumerate(weeks) if w[:4] == year]
-    im = imputed[keys][:, idx].sum()
-    bd = boardings[keys][:, idx].sum()
+    im = imputed[keys][:, idx].sum()  # adds up all imputed
+    bd = boardings[keys][:, idx].sum()# adds up all boardings
     return 100 * im / bd if bd else float("nan")
 
 
@@ -79,7 +79,7 @@ def main():
     lat = np.array(groups["lat"])
     lon = np.array(groups["lon"])
     poly = boundary()
-    berkeley = [i for i in range(groups["n"]) if inside(poly, lat[i], lon[i])]
+    berkeley = [i for i in range(groups["n"]) if inside(poly, lat[i], lon[i])] 
     campus = [
         i for i in range(groups["n"])
         if CAMPUS["south"] < lat[i] < CAMPUS["north"]
@@ -92,7 +92,7 @@ def main():
         print(f"     {year}: {year_share(imputed, boardings, range(groups['n']), year, weeks):5.2f}%")
     print("   Berkeley, by year:")
     for year in YEARS:
-        print(f"     {year}: {year_share(imputed, boardings, berkeley, year, weeks):5.2f}%")
+        print(f"     {year}: {year_share(imputed, boardings, berkeley, year, weeks):5.2f}%") # creates bounding box
     print()
 
     print("   route 1T, by year (route boardings; 2020 starts in August):")
@@ -114,7 +114,10 @@ def main():
     print("   routes new in the Aug 2025 era (absent from Dec 2024), 2025-26:")
     place = {i: name for i, name in enumerate(meta["route_names"])}
     era_set = lambda era: {place[i] for lst in meta["routes_by_era"][era] for i in lst}
-    new = era_set("Aug2025") - era_set("Dec2024")
+    new = era_set("Aug2025") - era_set("Dec2024") # gets realign directly
+    # pulls 211, 22, 231, 27, 281, 30, 31, 627, 633, 639, 678, 689, 72L, 9
+    # from https://www.actransit.org/realign/service-changes
+    # new lines are 9, 22, 27, 30, 31, 72L, 211, 231, 281, 627, 639, 633, 678, 689
     idx = [i for i, w in enumerate(weeks) if w[:4] in ("2025", "2026")]
     for name in sorted(new):
         if name not in route_names:
