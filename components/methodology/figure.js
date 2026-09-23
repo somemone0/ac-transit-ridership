@@ -260,8 +260,7 @@ export default function RouteFigure({ state }) {
   ];
 
   return (
-    <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${VB.h}`} role="img"
-      aria-label={t("figure.routeAria")}>
+    <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${VB.h}`}>
       <g style={{ transform: `translateY(${baseline}px)`, transition: `transform ${MOVE}` }}>
         <Route values={values} segmentsAt={segmentsAt} />
       </g>
@@ -298,13 +297,6 @@ export default function RouteFigure({ state }) {
 
         <Tex
           x={PAD.left + PLOT.w + 44}
-          y={126}
-          opacity={sparse ? 0 : 1}
-          color={COLORS.observed}
-          tex={t("figure.texOfTrips")}
-        />
-        <Tex
-          x={PAD.left + PLOT.w + 44}
           y={168}
           opacity={showCoverage || showCalibration ? 1 : 0}
           color={COLORS.coverage}
@@ -316,22 +308,6 @@ export default function RouteFigure({ state }) {
           opacity={showCalibration ? 1 : 0}
           color={COLORS.calibration}
           tex={String.raw`c_{\text{pra}} = 1.12`}
-        />
-        <Tex
-          x={PAD.left + PLOT.w + 44}
-          y={126}
-          opacity={sparse ? 1 : 0}
-          color={COLORS.dead}
-          size={16}
-          tex={t("figure.texTooLittle")}
-        />
-        <Tex
-          x={PAD.left + PLOT.w + 44}
-          y={182}
-          opacity={donorPanel ? 1 : 0}
-          color={COLORS.donor}
-          size={16}
-          tex={t("figure.texBorrowShape")}
         />
       </g>
     </svg>
@@ -376,8 +352,7 @@ function MixPanel() {
   ];
 
   return (
-    <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${VB.h}`} role="img"
-      aria-label={t("figure.weekAria")}>
+    <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${VB.h}`}>
       <Tex
         x={40}
         y={34}
@@ -387,16 +362,6 @@ function MixPanel() {
         align="center"
         color="var(--mth-ink)"
         tex={String.raw`r_{\text{week}} = r_{\text{month}}\bigl(\textcolor{#3987e5}{(1-w)\,p_{\text{week}}} + \textcolor{#c98500}{w\,p_{\text{sched}}}\bigr)`}
-      />
-      <Tex
-        x={40}
-        y={78}
-        width={VB.w - 80}
-        height={40}
-        size={15}
-        align="center"
-        color="var(--mth-muted)"
-        tex={t("figure.texSameMonth")}
       />
 
       {/* both terms stand on one line, so their heights are comparable */}
@@ -491,8 +456,7 @@ function WeekPanel({ state }) {
   const month = (value) => (value / C_ROUTE) * C_PRA;
 
   return (
-    <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${H}`} role="img"
-      aria-label={t("figure.monthAria")}>
+    <svg className="mth-fig" viewBox={`0 0 ${VB.w} ${H}`}>
       <g style={{ transform: `translateY(${PAD.top - 40}px)` }}>
         <Tex
           x={LEFT - 40}
@@ -507,17 +471,6 @@ function WeekPanel({ state }) {
               ? String.raw`r_{\text{week}} = r_{\text{month}}\bigl(\textcolor{#c98500}{w\,p_{\text{sched}}} + \textcolor{#58C4DD}{(1-w)\,p_{\text{week}}}\bigr)`
               : String.raw`r_{\text{week}} = r_{\text{month}}\cdot \textcolor{#58C4DD}{p_{\text{week}}}`
           }
-        />
-        <Tex
-          x={LEFT - 40}
-          y={28}
-          width={VB.w - 2 * (LEFT - 40)}
-          height={40}
-          size={15}
-          align="center"
-          color="var(--mth-muted)"
-          opacity={blended ? 1 : 0}
-          tex={t("figure.texGoldIsMonth")}
         />
       </g>
 

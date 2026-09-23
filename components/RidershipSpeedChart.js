@@ -100,7 +100,6 @@ export default function RidershipSpeedChart({ series, speed, meta }) {
   return (
     <div className="rs-chart square">
       <div className="rs-legend" aria-hidden="true">
-        <span><i className="rs-key solid" />{t("speedChart.legend")}</span>
         <span className="rs-time">
           {points[0].month.slice(0, 4)}
           <i className="rs-time-ramp" style={{ background: `linear-gradient(90deg, ${ramp.join(",")})` }} />
@@ -112,8 +111,6 @@ export default function RidershipSpeedChart({ series, speed, meta }) {
           ref={svgRef}
           viewBox={`0 0 ${size} ${size}`}
           className="rs-svg"
-          role="img"
-          aria-label={t("speedChart.ariaLabel")}
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
         >

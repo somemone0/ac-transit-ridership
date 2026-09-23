@@ -1044,7 +1044,6 @@ function Hud({ data, scene, week }) {
     if (scene.commuteMeasure && period) {
       return (
         <>
-          <div className="story-hud-kicker">{t("storyMap.commuteKicker")}</div>
           <div className="story-hud-title">{t("storyMap.commuteTitle", { month: fullM(month), year })}</div>
           <CommuteMeasureLegend data={data} measure={scene.commuteMeasure} p={periodIndex(data, week)} />
         </>
@@ -1052,14 +1051,7 @@ function Hud({ data, scene, week }) {
     }
     return (
       <>
-        <div className="story-hud-kicker">{t("storyMap.commuteKicker")}</div>
         <div className="story-hud-title">{t("storyMap.commuteTitle", { month: fullM(month), year })}</div>
-        <p className="story-hud-note">
-          {t("storyMap.commuteNote", {
-            direction: t(scene.focus?.mode === "from"
-              ? "storyMap.commuteLeaving" : "storyMap.commuteArriving"),
-          })}
-        </p>
         <Ramp colors={SEQ_GREEN.slice(1)}
           labels={[t("storyMap.commuteRampLow"), t("storyMap.commuteRampHigh")]} />
         <div className="story-swatch"><span className="member" />{t("storyMap.commuteMember")}</div>
@@ -1071,9 +1063,7 @@ function Hud({ data, scene, week }) {
     const threshold = Math.round(meta.recovery_thresholds[scene.recThresh] * 100);
     return (
       <>
-        <div className="story-hud-kicker">{t("storyMap.recoveryKicker")}</div>
         <div className="story-hud-title">{t("storyMap.recoveryTitle", { pct: threshold })}</div>
-        <p className="story-hud-note">{t("storyMap.recoveryNote", { pct: threshold })}</p>
         <Ramp colors={SEQ_BLUE} labels={[apMonth(meta.months[low]), apMonth(meta.months[meta.months.length - 1])]} />
         <div className="story-swatch"><span style={{ background: REC_NEVER }} />{t("storyMap.recoveryNever")}</div>
         <div className="story-swatch"><span style={{ background: REC_SMALL }} />{t("storyMap.recoverySmall")}</div>
@@ -1100,17 +1090,12 @@ function Hud({ data, scene, week }) {
           week={week}
           meta={meta}
         />
-        <p className="story-hud-note subtle">{t("storyMap.speedChartKey")}</p>
         <p className="story-hud-note">
           <T id="storyMap.speedNote" c={[<b />]} vars={{ mph: mph(speeds.p50[week]) }} />
           {Number.isFinite(ridership[week])
             ? <T id="storyMap.speedRidership" c={[<b />]}
                 vars={{ pct: Math.round(ridership[week] * 100) }} />
             : null}
-        </p>
-        <p className="story-hud-note subtle">
-          <T id="storyMap.speedSpread" c={[<b />, <b />]}
-            vars={{ low: mph(speeds.p10[week]), high: mph(speeds.p90[week]) }} />
         </p>
         <Ramp colors={SPEED_COLORS} labels={strings.storyMap.speedRamp} />
       </>
@@ -1147,10 +1132,6 @@ function CommuteMeasureLegend({ data, measure, p }) {
       <>
         <Ramp colors={SEQ_MAGENTA}
           labels={["0", t("explorer.legendPlus", { pct: fmt(commuteRtDomain(commute, "tract", p, "home")) })]} />
-        <p className="story-hud-note subtle">
-          {t(commute.rt ? "explorer.hintCommuteRoundTrip" : "explorer.hintCommuteDepartures",
-            { min: COMMUTE_MIN })}
-        </p>
       </>
     );
   }
@@ -1164,15 +1145,6 @@ function CommuteMeasureLegend({ data, measure, p }) {
         percent(median),
         t("explorer.legendPlus", { pct: percent(median * 4) }),
       ]} />
-      <p className="story-hud-note subtle">
-        {t("explorer.hintCompare", {
-          a: t("explorer.cellAcHome"),
-          b: t("explorer.cellAllHome"),
-          year: lodesYearFor(data.lodes, commute.meta.periods[p].id),
-          pct: percent(median),
-          min: COMMUTE_MIN,
-        })}
-      </p>
     </>
   );
 }
@@ -1196,7 +1168,7 @@ function DotScale({ data }) {
   });
   return (
     <div className="story-dotscale">
-      <svg width={x} height={height + 14} role="img" aria-label={t("storyMap.dotScaleAria")}>
+      <svg width={x} height={height + 14}>
         {dots.map((dot) => (
           <g key={dot.value}>
             <circle cx={dot.cx + 1} cy={height - dot.r - 1} r={dot.r} className="dot" />
@@ -1227,14 +1199,6 @@ function CityComparison({ data, week, basis }) {
   const max = 1.5;
   return (
     <div className="story-cities">
-      <div className="story-cities-title">
-        {year
-          ? t("storyMap.citiesTitleYear", {
-            from: apMonth(data.meta.weeks[data.W - 52]),
-            to: apMonth(data.meta.weeks[data.W - 1]),
-          })
-          : t("storyMap.citiesTitleWeek")}
-      </div>
       {rows.map((row) => (
         <div className={`story-city${row.name === "Berkeley" ? " focus" : ""}`} key={row.name}>
           <span className="story-city-name">{row.name}</span>
@@ -1255,7 +1219,7 @@ function CityComparison({ data, week, basis }) {
   );
 }
 
-export default function StoryMap({ data, initialBounds, apiRef, onReady, layout = "scrolly", label }) {
+export default function StoryMap({ data, initialBounds, apiRef, onReady, layout = "scrolly" }) {
   const containerRef = useRef(null);
   const dataRef = useRef(data);
   const engineRef = useRef(null);
@@ -1346,7 +1310,7 @@ export default function StoryMap({ data, initialBounds, apiRef, onReady, layout 
   }, [data]);
 
   return (
-    <div className="story-map" aria-label={label} role="img">
+    <div className="story-map">
       <div ref={containerRef} className="story-map-canvas" />
       {data && hud ? (
         <div className="story-hud">

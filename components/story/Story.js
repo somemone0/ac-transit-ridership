@@ -23,7 +23,7 @@ function clamp01(value) {
 // the trigger line owns the map; on a `scrub` step the week is instead
 // interpolated across the gap before its passage, so scrolling through that
 // empty stretch drives the time bar the way dragging it in the app would.
-function ScrollySection({ data, places, steps, label, first = "85vh" }) {
+function ScrollySection({ data, places, steps, first = "85vh" }) {
   const apiRef = useRef(null);
   const stepRefs = useRef([]);
   const cardRefs = useRef([]);
@@ -107,7 +107,7 @@ function ScrollySection({ data, places, steps, label, first = "85vh" }) {
   return (
     <section className="scrolly" ref={sectionRef}>
       <div className="scrolly-graphic">
-        <StoryMap data={data} initialBounds={initialBounds} apiRef={apiRef} onReady={update} label={label} />
+        <StoryMap data={data} initialBounds={initialBounds} apiRef={apiRef} onReady={update} />
       </div>
       <div className="scrolly-steps">
         {steps.map((step, index) => (
@@ -185,21 +185,18 @@ export default function Story() {
   return (
     <article className="story">
       <header className="story-hero">
-        <p className="story-kicker">{t("story.kicker")}</p>
         <h1>{t("story.title")}</h1>
         <p className="story-byline">{t("story.byline")}</p>
         <p className="story-lede">{t("story.lede")}</p>
         {error ? (
           <p className="story-error">{t("story.error", { message: error.message })}</p>
         ) : null}
-        <p className="story-scroll-cue" aria-hidden="true">{t("story.scrollCue")}</p>
       </header>
 
       <ScrollySection
         data={data}
         places={places}
         steps={MAP_ONE}
-        label={t("story.mapOneLabel")}
       />
 
       <div className="story-body">
@@ -213,7 +210,6 @@ export default function Story() {
         places={places}
         steps={MAP_TWO}
         first="70vh"
-        label={t("story.mapTwoLabel")}
       />
 
       <div className="story-body">
@@ -225,7 +221,6 @@ export default function Story() {
         places={places}
         steps={MAP_THREE}
         first="70vh"
-        label={t("story.mapThreeLabel")}
       />
 
       <div className="story-body">

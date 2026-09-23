@@ -379,9 +379,6 @@ function RouteDetail({ data, route, week, routeMode, onModeChange, commute, peri
           <T id="explorer.scheduleWarning" c={[<b />]} />
         </p>
       ) : null}
-      <p className="hint">
-        {t(routeMode === "own" ? "explorer.hintRouteOwn" : "explorer.hintRouteStreet")}
-      </p>
     </>
   );
 }
@@ -412,7 +409,6 @@ function RouteServiceTable({ data, route, week }) {
           ))}
         </tbody>
       </table>
-      <p className="hint">{t("explorer.hintService")}</p>
     </>
   );
 }
@@ -425,7 +421,7 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
           {detail.lv === "route" ? t("explorer.routeTitle", { id: detail.key }) : detail.label}
         </span>
         <button className="btn small ghost" type="button"
-          aria-label={t("explorer.closeDetails")} onClick={onClose}>
+          onClick={onClose}>
           {t("explorer.closeMark")}
         </button>
       </div>
@@ -456,10 +452,7 @@ function DetailPanel({ data, detail, week, routeMode, onRouteClick, onModeChange
 
 function ServiceLegend({ data, view, servicePeriod, week }) {
   const snap = displaySnapshot(data, week);
-  const target = serviceSnapshot(data, week);
   if (!snap) return <p className="hint">{t("explorer.noSnapshot")}</p>;
-  const period = snap.periods[servicePeriod];
-  const snapPeriods = snap.periods;
   const los = view === "los";
   const breaks = los ? HEADWAY_BREAKS : SPEED_BREAKS;
   const colors = los ? HEADWAY_COLORS : SPEED_COLORS;
@@ -483,20 +476,6 @@ function ServiceLegend({ data, view, servicePeriod, week }) {
       {los ? (
         <div className="legend-swatch"><span style={{ background: NO_SERVICE }} /><span>{t("explorer.legendNoTrips")}</span></div>
       ) : null}
-      {target && snap !== target ? (
-        <p className="hint">{t("explorer.hintShowingWhileLoading",
-          { shown: snap.label, target: target.label })}</p>
-      ) : null}
-      <p className="hint">
-        {t("explorer.hintServiceWindow", {
-          period: period.label,
-          snapshot: snap.label,
-          days: t(period.days === "weekend" ? "explorer.daysWeekend" : "explorer.daysWeekday"),
-          hours: periodHours(period, snapPeriods),
-        })}
-        {t(los ? "explorer.hintHeadwayMethod" : "explorer.hintSpeedMethod")}
-        {t("explorer.hintFromCounters")}
-      </p>
     </>
   );
 }
@@ -519,12 +498,9 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
   if (level !== "none" && !data.store[level]) {
     return <p className="hint">{t("explorer.loadingLevel")}</p>;
   }
-  if (level === "none") {
-    return <p className="hint">{t("explorer.legendStreetsOnly")}</p>;
-  }
+  if (level === "none") return null;
   if (view === "income") {
     const [lo, hi] = incomeDomain(data);
-    const income = data.meta.income;
     return (
       <>
         {bar(SEQ_MAGENTA)}
@@ -532,18 +508,11 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
           t("explorer.legendIncomeLow", { lo: Math.round(lo / 1000) }),
           t("explorer.legendIncomeHigh", { hi: Math.round(hi / 1000) }),
         )}
-        <p className="hint">
-          {t("explorer.hintIncome", {
-            measure: income.measure, year: income.year, table: income.table })}
-        </p>
-        <p className="hint">{t("explorer.hintIncomeStatic")}</p>
       </>
     );
   }
   if (view === "commute") {
-    if (!commute) {
-      return <p className="hint">{t("explorer.commuteUnavailable")}</p>;
-    }
+    if (!commute) return null;
     if (commuteFocus) {
       return (
         <>
@@ -552,16 +521,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
             t("explorer.legendNoFlow"),
             t("explorer.legendRidersWkday", { n: fmt(focusMax) }),
           )}
-          <p className="hint">
-            <T id="explorer.hintCommuteFocus" c={[<b />]} vars={{
-              direction: t(commuteFocusMode === "from"
-                ? "explorer.focusLeaving" : "explorer.focusArriving"),
-              label: commuteFocus.label,
-              period: period.label,
-              kind: t(commuteFocus.kind === "region"
-                ? "explorer.focusRegion" : "explorer.focusPlace"),
-            }} />
-          </p>
         </>
       );
     }
@@ -569,17 +528,7 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     const missing = commuteCells.filter(
       (cell) => cellIsTractOnly(cell) && (level !== "tract" || !data.lodes),
     );
-    if (missing.length) {
-      return (
-        <p className="hint">
-          <T id="explorer.hintLodesMissing" c={[<code />]}
-            vars={{ label: t(COMMUTE_CELLS[missing[0]].label) }} />
-        </p>
-      );
-    }
-    const year = lodesYear(data, data.commute.meta.periods.indexOf(period));
-    const names = orderCells(commuteCells).map((cell) => t(COMMUTE_CELLS[cell].label));
-    const roundTrip = !!data.commute.rt;
+    if (missing.length) return null;
     if (single) {
       const cell = commuteCells[0];
       return (
@@ -587,12 +536,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
           {bar(SEQ_MAGENTA)}
           {labels("0", t("explorer.legendPlus", {
             pct: fmt(cellDomain(data, level, data.commute.meta.periods.indexOf(period), cell)) }))}
-          <p className="hint">
-            {COMMUTE_CELLS[cell].src === "all"
-              ? t("explorer.hintLodesAll", { year })
-              : t(roundTrip ? "explorer.hintCommuteRoundTrip" : "explorer.hintCommuteDepartures",
-                { min: COMMUTE_MIN })}
-          </p>
         </>
       );
     }
@@ -607,10 +550,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
           <span>{percent(median)}</span>
           <span>{t("explorer.legendPlus", { pct: percent(median * 4) })}</span>
         </div>
-        <p className="hint">
-          {t("explorer.hintCompare", {
-            a: names[0], b: names[1], year, pct: percent(median), min: COMMUTE_MIN })}
-        </p>
       </>
     );
   }
@@ -619,7 +558,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
       <>
         {bar(SEQ_BLUE)}
         {labels("0", t("explorer.legendPerWeek", { n: fmt(data.domains[level]) }))}
-        <p className="hint">{t("explorer.hintTotal")}</p>
       </>
     );
   }
@@ -628,7 +566,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
       <>
         {bar(SEQ_GOLD)}
         {labels("0%", t("explorer.legendImputedHigh"))}
-        <p className="hint">{t("explorer.hintImputed")}</p>
       </>
     );
   }
@@ -640,10 +577,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
         {labels(meta.months[low], meta.months[meta.months.length - 1])}
         <div className="legend-swatch"><span style={{ background: REC_NEVER }} /><span>{t("explorer.legendNeverSustained")}</span></div>
         <div className="legend-swatch"><span style={{ background: REC_SMALL }} /><span>{t("explorer.legendBaselineTooSmall")}</span></div>
-        <p className="hint">
-          {t("explorer.hintRecovery",
-            { pct: (meta.recovery_thresholds[recThresh] * 100).toFixed(0) })}
-        </p>
       </>
     );
   }
@@ -651,7 +584,6 @@ function Legend({ data, view, level, recThresh, commute, commuteCells, period, c
     <>
       {bar(DIVERGING_RG)}
       {labels("0%", "200%")}
-      <p className="hint">{t("explorer.hintRelative", { week: meta.baseline_label })}</p>
     </>
   );
 }
@@ -683,7 +615,6 @@ function RouteSearch({ data, week, onPick }) {
         placeholder={t("explorer.searchPlaceholder")}
         autoComplete="off"
         spellCheck="false"
-        aria-label={t("explorer.searchAria")}
         onChange={(event) => { setQuery(event.target.value); setCursor(-1); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}
@@ -742,7 +673,7 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
           {tab === "riders" ? <button className="btn small" type="button" onClick={exportPng}>
             {t("explorer.exportPng")}</button> : null}
           <button className="btn small ghost" type="button"
-            aria-label={t("explorer.closeChart")} onClick={onClear}>{t("explorer.closeMark")}</button>
+            onClick={onClear}>{t("explorer.closeMark")}</button>
         </span>
       </div>
       {data.speed && selection.bounds ? (
@@ -772,7 +703,6 @@ function SelectionPanel({ data, selection, week, canvasRef, onClear }) {
             speed={speed}
             meta={data.meta}
           />
-          <p className="hint rs-caption">{t("explorer.hintSpeedScatter")}</p>
         </>
       ) : (
         <SelectionChart series={series} meta={data.meta} canvasRef={canvasRef} />
@@ -1497,7 +1427,7 @@ function corridorHoverHtml(data, era, index, load, imp, view, recThresh, service
   return `<div style="font-size:12px">${routeRow}`
     + `<div class="row"><span class="k">${escapeHtml(t("explorer.rowOnboardLoad"))}</span>`
     + `<span>${discloseHtml(load - imp, imp)}</span></div>${extra}`
-    + `<div class="row hint-row"><span class="k">${escapeHtml(t("explorer.tipClickToPick"))}</span></div></div>`;
+    + `</div>`;
 }
 
 /* ------------------------------------------------------------- commute view */
@@ -1756,10 +1686,6 @@ function CommutePanel({ data, commute, level, keyIndex, p }) {
     <>
       <h4>{t("explorer.headingWeekdayProfile", { label: period.label })}</h4>
       <HourlyChart now={now} base={base} windows={commute.meta.windows} />
-      <p className="hint">
-        {t("explorer.hintWeekdayProfile",
-          { base: commute.meta.base_label ?? "Feb 2020" })}
-      </p>
       <div style={{ marginBottom: 6 }}>
         <Row label={t("explorer.rowRidersWeekday")}>{fmt(stats.total)}</Row>
         <Row label={t("explorer.rowVsBaseline")}>{growth}</Row>
@@ -1828,18 +1754,6 @@ function renderMapLayers(api, data, options) {
   });
 }
 
-/* One plain paragraph per view, shown under the option while it is selected:
-   what the colours and sizes are, where the numbers come from, nothing more. */
-const VIEW_DESCRIPTIONS = {
-  total: "explorer.descTotal",
-  rel: "explorer.descRel",
-  recovery: "explorer.descRecovery",
-  commute: "explorer.descCommute",
-  speed: "explorer.descSpeed",
-  los: "explorer.descLos",
-  imp: "explorer.descImp",
-};
-
 const ABOUT_SEEN_KEY = "acpra-about-seen";
 
 function AboutModal({ onClose }) {
@@ -1858,10 +1772,7 @@ function AboutModal({ onClose }) {
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id="aboutTitle">{t("explorer.aboutTitle")}</h2>
-        <p>{t("explorer.about1")}</p>
-        <p>{t("explorer.about2")}</p>
         <p><T id="explorer.about3" c={[<b />, <span className="gold" />]} /></p>
-        <p>{t("explorer.about4")}</p>
         <div className="about-actions">
           <a className="about-link" href="/story">{t("explorer.aboutStory")}</a>
           <a className="about-link" href="/methodology">{t("explorer.aboutMethodology")}</a>
@@ -2339,7 +2250,6 @@ export default function RidershipExplorer() {
       <div id="app">
         <aside id="sidebar">
           <h1>{t("explorer.title")}</h1>
-          <p className="sub">{t("explorer.subtitle")}</p>
 
           <section>
             <h2>{t("explorer.headingView")}</h2>
@@ -2366,7 +2276,6 @@ export default function RidershipExplorer() {
                   />
                   {t(label)}
                 </label>
-                {view === value ? <p className="view-desc">{t(VIEW_DESCRIPTIONS[value])}</p> : null}
               </div>
             ))}
             {view === "recovery" ? (
@@ -2397,7 +2306,6 @@ export default function RidershipExplorer() {
                     </button>
                   ))}
                 </div>
-                <p className="hint">{t("explorer.hintServicePeriods")}</p>
               </div>
             ) : null}
             {view === "commute" && data?.commute ? (
@@ -2409,7 +2317,6 @@ export default function RidershipExplorer() {
                       <button
                         className="btn small ghost"
                         type="button"
-                        aria-label={t("explorer.clearFocus")}
                         onClick={() => setCommuteFocus(null)}
                       >
                         {t("explorer.closeMark")}
@@ -2430,10 +2337,9 @@ export default function RidershipExplorer() {
                         </button>
                       ))}
                     </div>
-                    <p className="hint">
-                      {t(commuteFocus.lists
-                        ? "explorer.hintFocusFlows" : "explorer.hintFocusLoading")}
-                    </p>
+                    {commuteFocus.lists ? null : (
+                      <p className="hint">{t("explorer.hintFocusLoading")}</p>
+                    )}
                   </>
                 ) : (
                   <div className="seg seg-wrap">
@@ -2455,19 +2361,6 @@ export default function RidershipExplorer() {
                     })}
                   </div>
                 )}
-                {!commuteFocus ? (
-                  <p className="hint">
-                    {commuteCells.length === 1
-                      ? t("explorer.hintCommuteSingle",
-                        { label: t(COMMUTE_CELLS[commuteCells[0]].label) })
-                      : t("explorer.hintCommuteCompare")}
-                    {data.lodes ? "" : t("explorer.hintLodesAbsent")}
-                  </p>
-                ) : null}
-                <p className="hint">
-                  {t("explorer.hintCommutePeriod",
-                    { label: data.commute.meta.periods[commutePeriodIdx].label })}
-                </p>
               </div>
             ) : null}
           </section>
@@ -2498,14 +2391,10 @@ export default function RidershipExplorer() {
                 {t(label)}
               </label>
             ))}
-            {commuteLocksTract ? (
-              <p className="hint">{t("explorer.hintTractOnly")}</p>
-            ) : null}
           </section>
 
           <section>
             <h2>{t("explorer.headingSelection")}</h2>
-            <p className="hint">{t("explorer.hintSelection")}</p>
             <button className="btn" type="button" disabled={!selection} onClick={clearSelection}>
               {t("explorer.clearSelection")}
             </button>

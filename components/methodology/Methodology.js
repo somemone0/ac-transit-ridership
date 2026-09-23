@@ -148,7 +148,7 @@ function Histogram() {
   const y = (v) => pad.t + (1 - v / max) * (h - pad.t - pad.b);
   return (
     <figure className="mth-hist">
-      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={t("methodology.histogramAria")}>
+      <svg viewBox={`0 0 ${w} ${h}`}>
         {all.map((value, i) => (
           <g key={i}>
             <rect className="mth-fig-bar" x={pad.l + i * bw + 1.5} width={bw - 3} y={y(value)}
@@ -170,12 +170,6 @@ function Histogram() {
           {max.toLocaleString()}
         </text>
       </svg>
-      <figcaption>
-        <T id="methodology.histogramCaption" c={[<C c="observed" />, <C c="schedule" />]} vars={{
-          all: HISTOGRAM.n_all.toLocaleString(),
-          y2019: HISTOGRAM.n_2019.toLocaleString(),
-        }} />
-      </figcaption>
     </figure>
   );
 }
@@ -220,7 +214,6 @@ export default function Methodology() {
     <div className="mth">
       <header className="mth-hero">
         <h1>{t("methodology.title")}</h1>
-        <p className="mth-kicker">{t("methodology.kicker")}</p>
         <p className="mth-links">
           <a href="/">{t("methodology.linkExplore")}</a> ·{" "}
           <a href="/story">{t("methodology.linkStory")}</a>
@@ -285,7 +278,6 @@ export default function Methodology() {
         </div>
         <Histogram />
         <p className="mth-links"><a href="/">{t("methodology.linkExploreArrow")}</a></p>
-        <p className="mth-foot">{t("methodology.footer")}</p>
       </section>
     </div>
   );
